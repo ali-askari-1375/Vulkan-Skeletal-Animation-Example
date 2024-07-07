@@ -13,10 +13,10 @@ layout(push_constant) uniform FPushConsts {
 
 void main()
 {
-	vec3 LightDirection = normalize(vec3(0.0f, -1.0f, 0.0f));
+	vec3 LightDirection = normalize(vec3(0.0f, 0.0f, 1.0f));
 
 	float Mod = dot(normalize(OutNormal), LightDirection);
-	vec3 Color = PushConsts.Color * ((Mod * 0.5f) + 0.5f);
+	vec3 Color = PushConsts.Color * ((Mod * 0.8f) + 0.2f);
 
 	FragColor = vec4(Color, 1.0f) ;
 }

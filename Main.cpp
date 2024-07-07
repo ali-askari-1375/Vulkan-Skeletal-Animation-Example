@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <iterator>
 #include <fstream>
+#include <memory>
 
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
@@ -29,6 +30,176 @@
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
 #include <backends/imgui_impl_vulkan.h>
+
+
+class VkGltfModel final
+{
+
+public:
+	struct Primitive
+	{
+		uint32_t FirstIndex;
+		uint32_t IndexCount;
+	};
+
+	struct Mesh
+	{
+		std::vector<Primitive> Primitives;
+	};
+
+	struct Node
+	{
+		std::shared_ptr<Node>              Parent;
+		std::uint32_t                      Index;
+		std::vector<std::shared_ptr<Node>> Children;
+		Mesh                               Mesh;
+		DirectX::XMFLOAT3                  Translation{};
+		DirectX::XMFLOAT3                  Scale{1.0f, 1.0f, 1.0f};
+		DirectX::XMFLOAT4                  Rotation{};
+		std::int32_t                       Skin{-1};
+		DirectX::XMFLOAT4X4                Matrix;
+
+		DirectX::XMMATRIX                GetLocalMatrix() const
+		{
+			const DirectX::XMMATRIX XmMatrix            = DirectX::XMLoadFloat4x4(&Matrix);
+			const DirectX::XMMATRIX XmMatrixScale       = DirectX::XMMatrixScalingFromVector(DirectX::XMLoadFloat3(&Scale));
+			const DirectX::XMMATRIX XmMatrixRotation    = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&Rotation));
+			const DirectX::XMMATRIX XmMatrixTranslation = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&Translation));
+
+			const DirectX::XMMATRIX XmLocalMatrix = DirectX::XMMatrixMultiply(XmMatrix, DirectX::XMMatrixMultiply(XmMatrixScale, DirectX::XMMatrixMultiply(XmMatrixRotation, XmMatrixTranslation)));
+
+			return XmLocalMatrix;
+		}
+	};
+
+	struct Vertex
+	{
+		DirectX::XMFLOAT3 Pos;
+		DirectX::XMFLOAT3 Normal;
+		DirectX::XMFLOAT2 Uv;
+		DirectX::XMUINT4  JointIndices0;
+		DirectX::XMFLOAT4 JointWeights0;
+		DirectX::XMUINT4  JointIndices1;
+		DirectX::XMFLOAT4 JointWeights1;
+	};
+
+	struct Skin
+	{
+		std::string                              Name;
+		std::shared_ptr<Node>                    SkeletonRoot{nullptr};
+		std::vector<DirectX::XMFLOAT4X4>         InverseBindMatrices;
+		std::vector<std::shared_ptr<Node>>       Joints;
+		std::tuple<vk::Buffer, vk::DeviceMemory> Ssbo;
+		vk::DescriptorSet                        DescriptorSet;
+	};
+
+
+	struct AnimationSampler
+	{
+		std::string                    Interpolation;
+		std::vector<float>             Inputs;
+		std::vector<DirectX::XMFLOAT4> OutputsVec4;
+	};
+
+	struct AnimationChannel
+	{
+		std::string           Path;
+		std::shared_ptr<Node> Node;
+		std::uint32_t         SamplerIndex;
+	};
+
+	struct Animation
+	{
+		std::string                   Name;
+		std::vector<AnimationSampler> Samplers;
+		std::vector<AnimationChannel> Channels;
+		float                         Start{std::numeric_limits<float>::max()};
+		float                         End{std::numeric_limits<float>::min()};
+		float                         CurrentTime{0.0f};
+	};
+
+
+
+public:
+	VkGltfModel();
+	~VkGltfModel();
+
+	bool LoadFromFile(std::string FileName);
+	void LoadNode(const tinygltf::Node& InputNode, std::shared_ptr<VkGltfModel::Node> NodeParent, std::uint32_t NodeIndex, std::vector<std::uint32_t>& HostIndexBuffer, std::vector<VkGltfModel::Vertex>& HostVertexBuffer);
+	void LoadSkins();
+	void LoadAnimations();
+
+	std::shared_ptr<VkGltfModel::Node> FindNode(std::shared_ptr<Node> Parent, std::uint32_t Index) const;
+	std::shared_ptr<VkGltfModel::Node> NodeFromIndex(std::uint32_t Index) const;
+	DirectX::XMMATRIX GetNodeMatrix(std::shared_ptr<VkGltfModel::Node> Node);
+
+	void UpdateJoints(std::shared_ptr<VkGltfModel::Node> Node);
+	void UpdateAnimation(float DeltaTime);
+
+	void Shutdown();
+
+public:
+	tinygltf::Model M_Model;
+	std::vector<std::shared_ptr<Node>> M_Nodes;
+	std::vector<std::shared_ptr<Node>> M_LinearNodes;
+	std::vector<Skin>      M_Skins;
+	std::vector<Animation> M_Animations;
+
+	std::tuple<vk::Buffer, vk::DeviceMemory> M_VertexBufferTuple;
+	std::tuple<vk::Buffer, vk::DeviceMemory> M_IndexBufferTuple;
+
+	vk::DescriptorPool M_SkinsDescriptorPool = {};
+};
+
+
+void InitWindow();
+void ShutdownWindow();
+
+bool Render(bool bClearOnly = false);
+void ImGuiRender(vk::CommandBuffer CommandBuffer);
+
+std::uint32_t FindMemoryTypeIndex(std::uint32_t typeFilter, vk::MemoryPropertyFlags Properties);
+vk::ShaderModule CreateShader(const std::string &fileName);
+std::tuple<vk::Buffer, vk::DeviceMemory> CreateBuffer(vk::BufferUsageFlags UsageFlags, vk::DeviceSize ByteSize, void* DataPtr, bool bDeviceLocal = false);
+vk::CommandBuffer BeginSingleUseCommandBuffer();
+void EndSingleUseCommandBuffer(vk::CommandBuffer);
+
+void InitVulkan();
+void ShutdownVulkan();
+
+void InitPhysicalDevice();
+void InitQueueFamilies();
+void InitDevice();
+void InitQueues();
+
+void InitCommandPools();
+void InitCommandBuffers();
+void InitSyncObjects();
+
+void InitSurface();
+
+void InitRenderPass();
+
+void InitSwapchain();
+void CreateSwapchain();
+void DestroySwapchain();
+void RecreateSwapchain();
+void ShutdownSwapchain();
+
+void InitImGui();
+void ShutdownImGui();
+
+///////////////////////////////////////////////////////////////////////////
+void InitPipeline();
+void ShutdownPipeline();
+
+void InitModel();
+void ShutdownModel();
+
+LRESULT CALLBACK WndProc(HWND Hwnd, UINT Msg, WPARAM Wparam, LPARAM Lparam);
+
+
+
 
 
 HINSTANCE G_Hinstance = {};
@@ -96,56 +267,12 @@ ImFont *G_ConsolasFont = {};
 
 
 ////////////////////////////////////////////////////
+vk::DescriptorSetLayout G_SkinsDescriptorSetLayout = {};
 vk::PipelineLayout G_PipelineLayout = {};
 vk::Pipeline G_Pipeline = {};
 
-tinygltf::Model G_Model = {};
+VkGltfModel G_GltfModel;
 
-
-
-void InitWindow();
-void ShutdownWindow();
-
-bool Render();
-void ImGuiRender(vk::CommandBuffer CommandBuffer);
-
-std::uint32_t FindMemoryTypeIndex(std::uint32_t typeFilter, vk::MemoryPropertyFlags Properties);
-vk::ShaderModule CreateShader(const std::string &fileName);
-
-void InitVulkan();
-void ShutdownVulkan();
-
-void InitPhysicalDevice();
-void InitQueueFamilies();
-void InitDevice();
-void InitQueues();
-
-void InitCommandPools();
-void InitCommandBuffers();
-void InitSyncObjects();
-
-void InitSurface();
-
-void InitRenderPass();
-
-void InitSwapchain();
-void CreateSwapchain();
-void DestroySwapchain();
-void RecreateSwapchain();
-void ShutdownSwapchain();
-
-void InitImGui();
-void ShutdownImGui();
-
-///////////////////////////////////////////////////////////////////////////
-void InitPipeline();
-void ShutdownPipeline();
-
-void InitModel();
-void ShutdownModel();
-
-
-LRESULT CALLBACK WndProc(HWND Hwnd, UINT Msg, WPARAM Wparam, LPARAM Lparam);
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLine, int nCmdShow)
 {
@@ -156,17 +283,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLine
 	InitWindow();
 	InitVulkan();
 
-	::ShowWindow(G_Hwnd, SW_SHOW);
-	::UpdateWindow(G_Hwnd);
-
+	ImGui::SetCurrentContext(G_ImGuiContext);
+	Render(true);
+	ImGui::SetCurrentContext(nullptr);
 
 	MSG Msg = {};
 	bool bContinue = true;
+
+	::ShowWindow(G_Hwnd, SW_SHOW);
+	::UpdateWindow(G_Hwnd);
+
 	while(bContinue) {
-
-
-
-		for (std::uint32_t i = 0; i < std::uint32_t(100); i++) {
+		for (std::uint32_t i = 0; i < std::uint32_t(1); i++) {
 			if (::PeekMessage(&Msg, nullptr, 0, 0, PM_REMOVE)) {
 				if (Msg.message == WM_QUIT) {
 					bContinue = false;
@@ -183,16 +311,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLine
 			}
 		}
 
-
 		ImGui::SetCurrentContext(G_ImGuiContext);
-
 		if (!::IsIconic(G_Hwnd)) {
 			if (!Render()) {
 				RecreateSwapchain();
 				Render();
 			}
 		}
-
 		ImGui::SetCurrentContext(nullptr);
 	}
 
@@ -242,7 +367,7 @@ void InitWindow()
 {
 
 	static constexpr DWORD dwStyle = WS_CAPTION | WS_BORDER | WS_MINIMIZEBOX | WS_SYSMENU | WS_SIZEBOX | WS_MAXIMIZEBOX;
-	RECT rc = RECT{0, 0, 800, 600};
+	RECT rc = RECT{0, 0, 480, 640};
 	::AdjustWindowRectEx(&rc, dwStyle, FALSE, 0);
 
 	const WNDCLASSEXA wcx = WNDCLASSEXA{
@@ -256,7 +381,7 @@ void InitWindow()
 		LoadCursorA(nullptr, IDC_ARROW),
 		0,
 		0,
-		"TesselTestClass",
+		"VkSkelAnimTestClass",
 		LoadIconA(nullptr, IDI_APPLICATION)
 	};
 	::RegisterClassExA(&wcx);
@@ -264,8 +389,8 @@ void InitWindow()
 
 	G_Hwnd = ::CreateWindowExA(
 		0,
-		"TesselTestClass",
-		"Vk Test",
+		"VkSkelAnimTestClass",
+		"Vk Skeletal Animation Test",
 		dwStyle,
 		CW_USEDEFAULT,
 		CW_USEDEFAULT,
@@ -281,13 +406,13 @@ void InitWindow()
 void ShutdownWindow()
 {
 	::UnregisterClassA(
-		"TesselTestClass",
+		"VkSkelAnimTestClass",
 		G_Hinstance
 	);
 }
 
 
-bool Render()
+bool Render(bool bClearOnly)
 {
 	if (!G_SwapchainOK) return false;
 
@@ -332,14 +457,53 @@ bool Render()
 
 	CommandBuffer.beginRenderPass(&RenderPassBeginInfo, vk::SubpassContents::eInline, G_DLD);
 
-	CommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, G_Pipeline, G_DLD);
-	CommandBuffer.setViewport(0, vk::Viewport{0.0f, 0.0f, float(G_SwapchainExtent.width), float(G_SwapchainExtent.height), 0.0f, 1.0f}, G_DLD);
-	CommandBuffer.setScissor(0, vk::Rect2D{vk::Offset2D{0, 0}, vk::Extent2D{G_SwapchainExtent.width, G_SwapchainExtent.height}}, G_DLD);
+	if (!bClearOnly) {
+		CommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, G_Pipeline, G_DLD);
+
+		vk::DeviceSize VertexBufferOffset = 0;
+		CommandBuffer.bindVertexBuffers(0, 1, &std::get<0>(G_GltfModel.M_VertexBufferTuple), &VertexBufferOffset, G_DLD);
+		CommandBuffer.bindIndexBuffer(std::get<0>(G_GltfModel.M_IndexBufferTuple), 0, vk::IndexType::eUint32, G_DLD);
+
+		CommandBuffer.setViewport(0, vk::Viewport{0.0f, 0.0f, float(G_SwapchainExtent.width), float(G_SwapchainExtent.height), 0.0f, 1.0f}, G_DLD);
+		CommandBuffer.setScissor(0, vk::Rect2D{vk::Offset2D{0, 0}, vk::Extent2D{G_SwapchainExtent.width, G_SwapchainExtent.height}}, G_DLD);
+
+		const DirectX::XMMATRIX MatProj = DirectX::XMMatrixPerspectiveFovRH(-DirectX::XMConvertToRadians(35), float(G_SwapchainExtent.width) / float(G_SwapchainExtent.height), 0.1f, 10000);
+		const DirectX::XMMATRIX MatView = DirectX::XMMatrixLookAtRH(DirectX::XMVectorSet(-100.0f, 150.0f, 400.0f, 0.0f), DirectX::XMVectorSet(0.0f, 80.0f, 0.0f, 0.0f), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
+		const DirectX::XMMATRIX MatProjView = DirectX::XMMatrixMultiply(MatView, MatProj);
+		DirectX::XMFLOAT4X4 MatProjViewDest;
+		DirectX::XMStoreFloat4x4(&MatProjViewDest, MatProjView);
+
+		static auto PrevTime = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds(1);
+		auto CurrentTime = std::chrono::high_resolution_clock::now();
+		const float DeltaTime = float(std::chrono::duration_cast<std::chrono::milliseconds>(CurrentTime-PrevTime).count()) / 1000.0f;
+		PrevTime = CurrentTime;
 
 
+		G_GltfModel.UpdateAnimation(DeltaTime);
+
+		for (auto &Node : G_GltfModel.M_LinearNodes) {
+
+			if (Node->Skin < 0) continue;
+
+			const DirectX::XMMATRIX MatModel = DirectX::XMMatrixIdentity();
+			DirectX::XMFLOAT4X4 MatModelDest;
+			DirectX::XMStoreFloat4x4(&MatModelDest, MatModel);
+
+			CommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, G_PipelineLayout, 0, G_GltfModel.M_Skins[Node->Skin].DescriptorSet, nullptr, G_DLD);
+
+			for (auto& Primitive : Node->Mesh.Primitives) {
 
 
-	ImGuiRender(CommandBuffer);
+				CommandBuffer.pushConstants(G_PipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(DirectX::XMFLOAT4X4), &MatProjViewDest, G_DLD);
+				CommandBuffer.pushConstants(G_PipelineLayout, vk::ShaderStageFlagBits::eVertex, sizeof(DirectX::XMFLOAT4X4), sizeof(DirectX::XMFLOAT4X4), &MatModelDest, G_DLD);
+				CommandBuffer.pushConstants(G_PipelineLayout, vk::ShaderStageFlagBits::eFragment, sizeof(DirectX::XMFLOAT4X4) + sizeof(DirectX::XMFLOAT4X4), sizeof(DirectX::XMFLOAT3), DirectX::Colors::SpringGreen.f, G_DLD);
+
+				CommandBuffer.drawIndexed(Primitive.IndexCount, 1, Primitive.FirstIndex, 0, 0, G_DLD);
+			}
+		}
+
+		ImGuiRender(CommandBuffer);
+	}
 
 	CommandBuffer.endRenderPass(G_DLD);
 
@@ -434,6 +598,84 @@ vk::ShaderModule CreateShader(const std::string &fileName)
 		);
 
 	return G_Device.createShaderModule(ShaderModuleCI, nullptr, G_DLD);
+}
+
+std::tuple<vk::Buffer, vk::DeviceMemory> CreateBuffer(vk::BufferUsageFlags UsageFlags, vk::DeviceSize ByteSize, void* DataPtr, bool bDeviceLocal)
+{
+	const vk::BufferCreateInfo BufferCI = vk::BufferCreateInfo(
+		{},
+		ByteSize,
+		(bDeviceLocal ? (UsageFlags | vk::BufferUsageFlagBits::eTransferSrc) : UsageFlags),
+		vk::SharingMode::eExclusive,
+		0,
+		nullptr
+		);
+
+	const vk::Buffer Buffer = G_Device.createBuffer(BufferCI, nullptr, G_DLD);
+
+	const vk::MemoryRequirements MemReqs = G_Device.getBufferMemoryRequirements(Buffer, G_DLD);
+	const std::uint32_t MemTypeIndex = FindMemoryTypeIndex(MemReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	const vk::MemoryAllocateInfo MemAI = vk::MemoryAllocateInfo(MemReqs.size, MemTypeIndex);
+
+	vk::DeviceMemory BufferMemory = G_Device.allocateMemory(MemAI, nullptr, G_DLD);
+	G_Device.bindBufferMemory(Buffer, BufferMemory, 0, G_DLD);
+
+	void* Mapped =G_Device.mapMemory(BufferMemory, 0, vk::WholeSize, vk::MemoryMapFlags(), G_DLD);
+	if (DataPtr) {
+		std::memcpy(Mapped, DataPtr, ByteSize);
+	} else {
+		std::memset(Mapped, 0, ByteSize);
+	}
+	G_Device.unmapMemory(BufferMemory, G_DLD);
+
+	if (bDeviceLocal) {
+		const vk::BufferCreateInfo LocalBufferCI = vk::BufferCreateInfo(
+			{},
+			ByteSize,
+			UsageFlags | vk::BufferUsageFlagBits::eTransferDst,
+			vk::SharingMode::eExclusive,
+			0,
+			nullptr
+			);
+
+		const vk::Buffer LocalBuffer = G_Device.createBuffer(LocalBufferCI, nullptr, G_DLD);
+		const vk::MemoryRequirements LocalMemReqs = G_Device.getBufferMemoryRequirements(LocalBuffer, G_DLD);
+		const std::uint32_t LocalMemTypeIndex = FindMemoryTypeIndex(LocalMemReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+		const vk::MemoryAllocateInfo LocalMemAI = vk::MemoryAllocateInfo(LocalMemReqs.size, LocalMemTypeIndex);
+
+		const vk::DeviceMemory LocalBufferMemory = G_Device.allocateMemory(LocalMemAI, nullptr, G_DLD);
+		G_Device.bindBufferMemory(LocalBuffer, LocalBufferMemory, 0, G_DLD);
+
+		const vk::CommandBuffer CommandBuffer = BeginSingleUseCommandBuffer();
+		const vk::BufferCopy BufferCopy = vk::BufferCopy(0, 0, ByteSize);
+		CommandBuffer.copyBuffer(Buffer, LocalBuffer, BufferCopy, G_DLD);
+		EndSingleUseCommandBuffer(CommandBuffer);
+
+		G_Device.freeMemory(BufferMemory, nullptr, G_DLD);
+		G_Device.destroyBuffer(Buffer, nullptr, G_DLD);
+
+		return std::make_tuple(LocalBuffer, LocalBufferMemory);
+	}
+
+	return std::make_tuple(Buffer, BufferMemory);
+}
+
+vk::CommandBuffer BeginSingleUseCommandBuffer()
+{
+	const vk::CommandBufferAllocateInfo CommandBufferAI = vk::CommandBufferAllocateInfo(G_StaticCommandPool, vk::CommandBufferLevel::ePrimary, 1);
+	vk::CommandBuffer CommandBuffer = G_Device.allocateCommandBuffers(CommandBufferAI, G_DLD)[0];
+	const vk::CommandBufferBeginInfo CommandBufferBI = vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+	CommandBuffer.begin(CommandBufferBI, G_DLD);
+
+	return CommandBuffer;
+}
+
+void EndSingleUseCommandBuffer(vk::CommandBuffer CommandBuffer)
+{
+	CommandBuffer.end(G_DLD);
+	const vk::SubmitInfo SI = vk::SubmitInfo(0, nullptr, 0, 1, &CommandBuffer, 0, nullptr);
+	G_GraphicsQueue.submit(SI, nullptr, G_DLD);
+	G_GraphicsQueue.waitIdle(G_DLD);
 }
 
 void InitVulkan()
@@ -1452,11 +1694,15 @@ void ShutdownImGui()
 
 void InitPipeline()
 {
+	static constexpr vk::DescriptorSetLayoutBinding DescriptorSetLayoutBinding = vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr);
+	static constexpr vk::DescriptorSetLayoutCreateInfo DescriptorSetLayoutCI = vk::DescriptorSetLayoutCreateInfo({}, 1, &DescriptorSetLayoutBinding);
+	G_SkinsDescriptorSetLayout = G_Device.createDescriptorSetLayout(DescriptorSetLayoutCI, nullptr, G_DLD);
+
 	static constexpr vk::PushConstantRange PushConstantRanges[2] = {
 		vk::PushConstantRange(vk::ShaderStageFlagBits::eVertex, 0, 2 * sizeof(DirectX::XMFLOAT4X4)),
 		vk::PushConstantRange(vk::ShaderStageFlagBits::eFragment, 2 * sizeof(DirectX::XMFLOAT4X4), sizeof(DirectX::XMFLOAT3)),
 	};
-	static constexpr vk::PipelineLayoutCreateInfo PipelineLayoutCI = vk::PipelineLayoutCreateInfo{{}, 0, nullptr, 2, PushConstantRanges};
+	static constexpr vk::PipelineLayoutCreateInfo PipelineLayoutCI = vk::PipelineLayoutCreateInfo{{}, 1, &G_SkinsDescriptorSetLayout, 2, PushConstantRanges};
 	G_PipelineLayout = G_Device.createPipelineLayout(PipelineLayoutCI, nullptr, G_DLD);
 
 	vk::ShaderModule ShaderModuleVS = CreateShader("DefaultVS.spv");
@@ -1467,15 +1713,19 @@ void InitPipeline()
 		vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eFragment, ShaderModuleFS, "main"),
 	};
 
-	static constexpr vk::VertexInputBindingDescription VertexInputBindingDescriptions[2] = {
-		vk::VertexInputBindingDescription(0, sizeof(DirectX::XMFLOAT3), vk::VertexInputRate::eVertex),
-		vk::VertexInputBindingDescription(1, sizeof(DirectX::XMFLOAT3), vk::VertexInputRate::eVertex),
+	static constexpr vk::VertexInputBindingDescription VertexInputBindingDescriptions[1] = {
+		vk::VertexInputBindingDescription(0, sizeof(VkGltfModel::Vertex), vk::VertexInputRate::eVertex),
 	};
-	static constexpr vk::VertexInputAttributeDescription VertexInputAttributeDescriptions[2] = {
-		vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat, 0),
-		vk::VertexInputAttributeDescription(1, 1, vk::Format::eR32G32B32Sfloat, 0)
+	static constexpr vk::VertexInputAttributeDescription VertexInputAttributeDescriptions[7] = {
+		vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat,    0),
+		vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat,    sizeof(DirectX::XMFLOAT3)),
+		vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat,       sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)),
+		vk::VertexInputAttributeDescription(3, 0, vk::Format::eR32G32B32A32Uint,   sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT2)),
+		vk::VertexInputAttributeDescription(4, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT2) + sizeof(DirectX::XMUINT4)),
+		vk::VertexInputAttributeDescription(5, 0, vk::Format::eR32G32B32A32Uint,   sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT2) + sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4)),
+		vk::VertexInputAttributeDescription(6, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT2) + sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4) + sizeof(DirectX::XMUINT4)),
 	};
-	static constexpr vk::PipelineVertexInputStateCreateInfo VertexInputStateCI = vk::PipelineVertexInputStateCreateInfo({}, 2, VertexInputBindingDescriptions, 2, VertexInputAttributeDescriptions);
+	static constexpr vk::PipelineVertexInputStateCreateInfo VertexInputStateCI = vk::PipelineVertexInputStateCreateInfo({}, 1, VertexInputBindingDescriptions, 7, VertexInputAttributeDescriptions);
 
 	static constexpr vk::PipelineInputAssemblyStateCreateInfo InputAssemblyCI = vk::PipelineInputAssemblyStateCreateInfo({}, vk::PrimitiveTopology::eTriangleList);
 	static constexpr vk::PipelineTessellationStateCreateInfo TesselationStateCI = vk::PipelineTessellationStateCreateInfo();
@@ -1528,24 +1778,1269 @@ void ShutdownPipeline()
 		G_Device.destroyPipelineLayout(G_PipelineLayout, nullptr, G_DLD);
 		G_PipelineLayout = nullptr;
 	}
+
+	if (G_SkinsDescriptorSetLayout) {
+
+		G_Device.destroyDescriptorSetLayout(G_SkinsDescriptorSetLayout, nullptr, G_DLD);
+		G_SkinsDescriptorSetLayout = nullptr;
+	}
 }
 
 void InitModel()
+{
+	if (!G_GltfModel.LoadFromFile("Bot_Running.glb")) {
+		throw std::runtime_error("Failed to load the model");
+	}
+}
+
+void ShutdownModel()
+{
+	G_GltfModel.Shutdown();
+}
+
+
+
+VkGltfModel::VkGltfModel()
+{
+
+}
+
+VkGltfModel::~VkGltfModel()
+{
+
+}
+
+bool VkGltfModel::LoadFromFile(std::string FileName)
 {
 	tinygltf::TinyGLTF Loader;
 
 	std::string StrErr;
 	std::string StrWarn;
-	const std::string FilePath = std::string(APP_SOURCE_PATH) + std::string("/models/Manny/MM_Run_Fwd.gltf");
+	const std::string FilePath = std::string(APP_SOURCE_PATH) + std::string("/models/") + FileName;
 
-	if (!Loader.LoadASCIIFromFile(&G_Model, &StrErr, &StrWarn, FilePath))
-		return;
+	if (!Loader.LoadASCIIFromFile(&M_Model, &StrErr, &StrWarn, FilePath)) {
+		if (!Loader.LoadBinaryFromFile(&M_Model, &StrErr, &StrWarn, FilePath)) {
+			return false;
+		}
+	}
+
+	std::vector<std::uint32_t> HostIndexBuffer;
+	std::vector<VkGltfModel::Vertex> HostVertexBuffer;
+
+	const tinygltf::Scene& Scene = M_Model.scenes[0];
+	for (std::size_t i = 0; i < Scene.nodes.size(); i++) {
+		const tinygltf::Node Node = M_Model.nodes[Scene.nodes[i]];
+		LoadNode(Node, nullptr, Scene.nodes[i], HostIndexBuffer, HostVertexBuffer);
+
+	}
+	LoadSkins();
+	LoadAnimations();
 
 
 
+	for (auto Node : M_Nodes)
+	{
+		UpdateJoints(Node);
+	}
+	UpdateAnimation(0.1);
+
+
+	M_VertexBufferTuple = CreateBuffer(vk::BufferUsageFlagBits::eVertexBuffer, HostVertexBuffer.size() * sizeof(Vertex), HostVertexBuffer.data(), true);
+	M_IndexBufferTuple = CreateBuffer(vk::BufferUsageFlagBits::eIndexBuffer, HostIndexBuffer.size() * sizeof(std::uint32_t), HostIndexBuffer.data(), true);
+
+	return true;
 }
 
-void ShutdownModel()
+void VkGltfModel::LoadNode(const tinygltf::Node &InputNode,  std::shared_ptr<VkGltfModel::Node> NodeParent, std::uint32_t NodeIndex, std::vector<uint32_t> &HostIndexBuffer, std::vector<Vertex> &HostVertexBuffer)
 {
+	std::shared_ptr<VkGltfModel::Node> Node(new VkGltfModel::Node());
+	Node->Parent = NodeParent;
+	Node->Index = NodeIndex;
+	Node->Skin = InputNode.skin;
+
+	const DirectX::XMMATRIX IdentityMatrix = DirectX::XMMatrixIdentity();
+	DirectX::XMStoreFloat4x4(&Node->Matrix, IdentityMatrix);
+
+	if (InputNode.translation.size() == 3) {
+		std::copy_n(InputNode.translation.begin(), 3, reinterpret_cast<float*>(&Node->Translation));
+	}
+	if (InputNode.rotation.size() == 4) {
+		std::copy_n(InputNode.rotation.begin(), 4, reinterpret_cast<float*>(&Node->Rotation));
+	}
+	if (InputNode.scale.size() == 3) {
+		std::copy_n(InputNode.scale.begin(), 3, reinterpret_cast<float*>(&Node->Scale));
+	}
+	if (InputNode.matrix.size() == 16) {
+		std::copy_n(InputNode.matrix.begin(), 16, reinterpret_cast<float*>(&Node->Matrix));
+	}
+
+	M_LinearNodes.push_back(Node);
+
+	if (InputNode.children.size() > 0)
+	{
+		for (size_t i = 0; i < InputNode.children.size(); i++)
+		{
+			LoadNode(M_Model.nodes[InputNode.children[i]], Node, InputNode.children[i], HostIndexBuffer, HostVertexBuffer);
+		}
+	}
+
+	if (InputNode.mesh > -1) {
+
+		const tinygltf::Mesh Mesh = M_Model.meshes[InputNode.mesh];
+
+		for (std::size_t i = 0; i < Mesh.primitives.size(); i++)
+		{
+			const tinygltf::Primitive &GlTFPrimitive = Mesh.primitives[i];
+			std::uint32_t              FirstIndex    = static_cast<std::uint32_t>(HostIndexBuffer.size());
+			std::uint32_t              VertexStart   = static_cast<std::uint32_t>(HostVertexBuffer.size());
+			std::uint32_t              IndexCount    = 0;
+			std::vector<Vertex>        LocalVertexBuffer;
+
+			{
+				const float*         PositionBuffer      = nullptr;
+				const float*         NormalsBuffer       = nullptr;
+				const float*         TexCoordsBuffer     = nullptr;
+				const std::uint32_t* JointIndicesBuffer0 = nullptr;
+				const float*         JointWeightsBuffer0 = nullptr;
+				const std::uint32_t* JointIndicesBuffer1 = nullptr;
+				const float*         JointWeightsBuffer1 = nullptr;
+				std::size_t          VertexCount         = 0;
+
+
+				if (GlTFPrimitive.attributes.find("POSITION") != GlTFPrimitive.attributes.end())
+				{
+					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("POSITION")->second];
+					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+					PositionBuffer                       = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+					VertexCount                          = Accessor.count;
+
+					LocalVertexBuffer.reserve(VertexCount);
+
+					for (std::size_t v = 0; v < VertexCount; v++) {
+						LocalVertexBuffer.emplace_back(Vertex{});
+						Vertex& Vtx = LocalVertexBuffer.back();
+
+						std::memset(&Vtx, 0, sizeof(Vertex));
+
+						switch(Accessor.componentType)
+						{
+						case TINYGLTF_COMPONENT_TYPE_FLOAT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.Pos.x = PositionBuffer[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.Pos.x = PositionBuffer[(v*2)+0];
+								Vtx.Pos.y = PositionBuffer[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.Pos.x = PositionBuffer[(v*3)+0];
+								Vtx.Pos.y = PositionBuffer[(v*3)+1];
+								Vtx.Pos.z = PositionBuffer[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.Pos.x = PositionBuffer[(v*4)+0];
+								Vtx.Pos.y = PositionBuffer[(v*4)+1];
+								Vtx.Pos.z = PositionBuffer[(v*4)+2];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.Pos.x = reinterpret_cast<const double*>(PositionBuffer)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.Pos.x = reinterpret_cast<const double*>(PositionBuffer)[(v*2)+0];
+								Vtx.Pos.y = reinterpret_cast<const double*>(PositionBuffer)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.Pos.x = reinterpret_cast<const double*>(PositionBuffer)[(v*3)+0];
+								Vtx.Pos.y = reinterpret_cast<const double*>(PositionBuffer)[(v*3)+1];
+								Vtx.Pos.z = reinterpret_cast<const double*>(PositionBuffer)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.Pos.x = reinterpret_cast<const double*>(PositionBuffer)[(v*4)+0];
+								Vtx.Pos.y = reinterpret_cast<const double*>(PositionBuffer)[(v*4)+1];
+								Vtx.Pos.z = reinterpret_cast<const double*>(PositionBuffer)[(v*4)+2];
+								break;
+							}
+							break;
+						}
+					}
+
+				} else {
+					continue;
+				}
+
+				if (GlTFPrimitive.attributes.find("NORMAL") != GlTFPrimitive.attributes.end())
+				{
+					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("NORMAL")->second];
+					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+					NormalsBuffer                        = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+					for (std::size_t v = 0; v < VertexCount; v++) {
+						Vertex& Vtx = LocalVertexBuffer[v];
+
+						switch(Accessor.componentType)
+						{
+						case TINYGLTF_COMPONENT_TYPE_FLOAT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.Normal.x = NormalsBuffer[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.Normal.x = NormalsBuffer[(v*2)+0];
+								Vtx.Normal.y = NormalsBuffer[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.Normal.x = NormalsBuffer[(v*3)+0];
+								Vtx.Normal.y = NormalsBuffer[(v*3)+1];
+								Vtx.Normal.z = NormalsBuffer[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.Normal.x = NormalsBuffer[(v*4)+0];
+								Vtx.Normal.y = NormalsBuffer[(v*4)+1];
+								Vtx.Normal.z = NormalsBuffer[(v*4)+2];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.Normal.x = reinterpret_cast<const double*>(NormalsBuffer)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.Normal.x = reinterpret_cast<const double*>(NormalsBuffer)[(v*2)+0];
+								Vtx.Normal.y = reinterpret_cast<const double*>(NormalsBuffer)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.Normal.x = reinterpret_cast<const double*>(NormalsBuffer)[(v*3)+0];
+								Vtx.Normal.y = reinterpret_cast<const double*>(NormalsBuffer)[(v*3)+1];
+								Vtx.Normal.z = reinterpret_cast<const double*>(NormalsBuffer)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.Normal.x = reinterpret_cast<const double*>(NormalsBuffer)[(v*4)+0];
+								Vtx.Normal.y = reinterpret_cast<const double*>(NormalsBuffer)[(v*4)+1];
+								Vtx.Normal.z = reinterpret_cast<const double*>(NormalsBuffer)[(v*4)+2];
+								break;
+							}
+							break;
+						}
+					}
+				}
+
+
+				if (GlTFPrimitive.attributes.find("TEXCOORD_0") != GlTFPrimitive.attributes.end())
+				{
+					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("TEXCOORD_0")->second];
+					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+					TexCoordsBuffer                      = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+					for (std::size_t v = 0; v < VertexCount; v++) {
+						Vertex& Vtx = LocalVertexBuffer[v];
+
+						switch(Accessor.componentType)
+						{
+						case TINYGLTF_COMPONENT_TYPE_FLOAT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.Uv.x = TexCoordsBuffer[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.Uv.x = TexCoordsBuffer[(v*2)+0];
+								Vtx.Uv.y = TexCoordsBuffer[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.Uv.x = TexCoordsBuffer[(v*3)+0];
+								Vtx.Uv.y = TexCoordsBuffer[(v*3)+1];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.Uv.x = TexCoordsBuffer[(v*4)+0];
+								Vtx.Uv.y = TexCoordsBuffer[(v*4)+1];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.Uv.x = reinterpret_cast<const double*>(TexCoordsBuffer)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.Uv.x = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*2)+0];
+								Vtx.Uv.y = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.Uv.x = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*3)+0];
+								Vtx.Uv.y = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*3)+1];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.Uv.x = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*4)+0];
+								Vtx.Uv.y = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*4)+1];
+								break;
+							}
+							break;
+						}
+					}
+				}
+
+				if (GlTFPrimitive.attributes.find("JOINTS_0") != GlTFPrimitive.attributes.end())
+				{
+					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("JOINTS_0")->second];
+					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+					JointIndicesBuffer0                  = reinterpret_cast<const uint32_t *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+					for (std::size_t v = 0; v < VertexCount; v++) {
+						Vertex& Vtx = LocalVertexBuffer[v];
+
+						switch(Accessor.componentType)
+						{
+						case TINYGLTF_COMPONENT_TYPE_BYTE:
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*2)+0];
+								Vtx.JointIndices0.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*3)+0];
+								Vtx.JointIndices0.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*3)+1];
+								Vtx.JointIndices0.z = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*4)+0];
+								Vtx.JointIndices0.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*4)+1];
+								Vtx.JointIndices0.z = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*4)+2];
+								Vtx.JointIndices0.w = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_SHORT:
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*2)+0];
+								Vtx.JointIndices0.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*3)+0];
+								Vtx.JointIndices0.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*3)+1];
+								Vtx.JointIndices0.z = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*4)+0];
+								Vtx.JointIndices0.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*4)+1];
+								Vtx.JointIndices0.z = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*4)+2];
+								Vtx.JointIndices0.w = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_INT:
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*2)+0];
+								Vtx.JointIndices0.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*3)+0];
+								Vtx.JointIndices0.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*3)+1];
+								Vtx.JointIndices0.z = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointIndices0.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*4)+0];
+								Vtx.JointIndices0.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*4)+1];
+								Vtx.JointIndices0.z = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*4)+2];
+								Vtx.JointIndices0.w = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						}
+					}
+				}
+
+				if (GlTFPrimitive.attributes.find("WEIGHTS_0") != GlTFPrimitive.attributes.end())
+				{
+					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("WEIGHTS_0")->second];
+					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+					JointWeightsBuffer0                  = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+					for (std::size_t v = 0; v < VertexCount; v++) {
+						Vertex& Vtx = LocalVertexBuffer[v];
+
+
+						switch(Accessor.componentType)
+						{
+						case TINYGLTF_COMPONENT_TYPE_FLOAT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights0.x = JointWeightsBuffer0[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights0.x = JointWeightsBuffer0[(v*2)+0];
+								Vtx.JointWeights0.y = JointWeightsBuffer0[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights0.x = JointWeightsBuffer0[(v*3)+0];
+								Vtx.JointWeights0.y = JointWeightsBuffer0[(v*3)+1];
+								Vtx.JointWeights0.z = JointWeightsBuffer0[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights0.x = JointWeightsBuffer0[(v*4)+0];
+								Vtx.JointWeights0.y = JointWeightsBuffer0[(v*4)+1];
+								Vtx.JointWeights0.z = JointWeightsBuffer0[(v*4)+2];
+								Vtx.JointWeights0.w = JointWeightsBuffer0[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights0.x = reinterpret_cast<const double*>(JointWeightsBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights0.x = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*2)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights0.x = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*3)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*3)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights0.x = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*4)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*4)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*4)+2];
+								Vtx.JointWeights0.w = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_BYTE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*2)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*3)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*3)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*4)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*4)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*4)+2];
+								Vtx.JointWeights0.w = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*2)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*3)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*3)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*4)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*4)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*4)+2];
+								Vtx.JointWeights0.w = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_SHORT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*2)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*3)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*3)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*4)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*4)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*4)+2];
+								Vtx.JointWeights0.w = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*2)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*3)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*3)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*4)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*4)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*4)+2];
+								Vtx.JointWeights0.w = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_INT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*2)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*3)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*3)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*4)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*4)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*4)+2];
+								Vtx.JointWeights0.w = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*2)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*3)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*3)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights0.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*4)+0];
+								Vtx.JointWeights0.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*4)+1];
+								Vtx.JointWeights0.z = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*4)+2];
+								Vtx.JointWeights0.w = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*4)+3];
+								break;
+							}
+							break;
+						}
+					}
+				}
+
+				if (GlTFPrimitive.attributes.find("JOINTS_1") != GlTFPrimitive.attributes.end())
+				{
+					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("JOINTS_1")->second];
+					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+					JointIndicesBuffer1                  = reinterpret_cast<const uint32_t *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+					for (std::size_t v = 0; v < VertexCount; v++) {
+						Vertex& Vtx = LocalVertexBuffer[v];
+
+						switch(Accessor.componentType)
+						{
+						case TINYGLTF_COMPONENT_TYPE_BYTE:
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*2)+0];
+								Vtx.JointIndices1.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*3)+0];
+								Vtx.JointIndices1.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*3)+1];
+								Vtx.JointIndices1.z = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*4)+0];
+								Vtx.JointIndices1.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*4)+1];
+								Vtx.JointIndices1.z = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*4)+2];
+								Vtx.JointIndices1.w = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_SHORT:
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*2)+0];
+								Vtx.JointIndices1.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*3)+0];
+								Vtx.JointIndices1.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*3)+1];
+								Vtx.JointIndices1.z = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*4)+0];
+								Vtx.JointIndices1.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*4)+1];
+								Vtx.JointIndices1.z = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*4)+2];
+								Vtx.JointIndices1.w = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_INT:
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*2)+0];
+								Vtx.JointIndices1.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*3)+0];
+								Vtx.JointIndices1.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*3)+1];
+								Vtx.JointIndices1.z = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointIndices1.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*4)+0];
+								Vtx.JointIndices1.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*4)+1];
+								Vtx.JointIndices1.z = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*4)+2];
+								Vtx.JointIndices1.w = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						}
+					}
+				}
+
+				if (GlTFPrimitive.attributes.find("WEIGHTS_1") != GlTFPrimitive.attributes.end())
+				{
+					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("WEIGHTS_1")->second];
+					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+					JointWeightsBuffer1                  = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+					for (std::size_t v = 0; v < VertexCount; v++) {
+						Vertex& Vtx = LocalVertexBuffer[v];
+
+						switch(Accessor.componentType)
+						{
+						case TINYGLTF_COMPONENT_TYPE_FLOAT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights1.x = JointWeightsBuffer1[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights1.x = JointWeightsBuffer1[(v*2)+0];
+								Vtx.JointWeights1.y = JointWeightsBuffer1[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights1.x = JointWeightsBuffer1[(v*3)+0];
+								Vtx.JointWeights1.y = JointWeightsBuffer1[(v*3)+1];
+								Vtx.JointWeights1.z = JointWeightsBuffer1[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights1.x = JointWeightsBuffer1[(v*4)+0];
+								Vtx.JointWeights1.y = JointWeightsBuffer1[(v*4)+1];
+								Vtx.JointWeights1.z = JointWeightsBuffer1[(v*4)+2];
+								Vtx.JointWeights1.w = JointWeightsBuffer1[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights1.x = reinterpret_cast<const double*>(JointWeightsBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights1.x = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*2)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights1.x = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*3)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*3)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights1.x = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*4)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*4)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*4)+2];
+								Vtx.JointWeights1.w = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_BYTE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*2)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*3)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*3)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*4)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*4)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*4)+2];
+								Vtx.JointWeights1.w = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*2)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*3)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*3)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*4)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*4)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*4)+2];
+								Vtx.JointWeights1.w = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_SHORT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*2)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*3)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*3)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*4)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*4)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*4)+2];
+								Vtx.JointWeights1.w = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*2)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*3)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*3)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*4)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*4)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*4)+2];
+								Vtx.JointWeights1.w = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_INT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*2)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*3)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*3)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*4)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*4)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*4)+2];
+								Vtx.JointWeights1.w = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+							switch(Accessor.type)
+							{
+							case TINYGLTF_TYPE_SCALAR:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[v];
+								break;
+							case TINYGLTF_TYPE_VEC2:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*2)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*2)+1];
+								break;
+							case TINYGLTF_TYPE_VEC3:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*3)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*3)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*3)+2];
+								break;
+							case TINYGLTF_TYPE_VEC4:
+								Vtx.JointWeights1.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*4)+0];
+								Vtx.JointWeights1.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*4)+1];
+								Vtx.JointWeights1.z = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*4)+2];
+								Vtx.JointWeights1.w = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*4)+3];
+								break;
+							}
+							break;
+						}
+					}
+				}
+
+				std::copy(LocalVertexBuffer.begin(), LocalVertexBuffer.end(), std::back_inserter(HostVertexBuffer));
+			}
+
+			{
+				const tinygltf::Accessor &  Accessor   = M_Model.accessors[GlTFPrimitive.indices];
+				const tinygltf::BufferView& BufferView = M_Model.bufferViews[Accessor.bufferView];
+				const tinygltf::Buffer&     Buffer     = M_Model.buffers[BufferView.buffer];
+
+				IndexCount += static_cast<std::uint32_t>(Accessor.count);
+
+				switch (Accessor.componentType)
+				{
+				case TINYGLTF_PARAMETER_TYPE_INT:
+				case TINYGLTF_PARAMETER_TYPE_UNSIGNED_INT: {
+					const std::uint32_t* buf = reinterpret_cast<const std::uint32_t*>(&Buffer.data[Accessor.byteOffset + BufferView.byteOffset]);
+					for (size_t index = 0; index < Accessor.count; index++)
+					{
+						HostIndexBuffer.push_back(buf[index] + VertexStart);
+					}
+					break;
+				}
+				case TINYGLTF_PARAMETER_TYPE_SHORT:
+				case TINYGLTF_PARAMETER_TYPE_UNSIGNED_SHORT: {
+					const std::uint16_t* buf = reinterpret_cast<const std::uint16_t*>(&Buffer.data[Accessor.byteOffset + BufferView.byteOffset]);
+					for (std::size_t index = 0; index < Accessor.count; index++)
+					{
+						HostIndexBuffer.push_back(buf[index] + VertexStart);
+					}
+					break;
+				}
+				case TINYGLTF_PARAMETER_TYPE_BYTE:
+				case TINYGLTF_PARAMETER_TYPE_UNSIGNED_BYTE: {
+					const std::uint8_t* buf = reinterpret_cast<const std::uint8_t*>(&Buffer.data[Accessor.byteOffset + BufferView.byteOffset]);
+					for (std::size_t index = 0; index < Accessor.count; index++)
+					{
+						HostIndexBuffer.push_back(buf[index] + VertexStart);
+					}
+					break;
+				}
+				}
+			}
+
+			Primitive primitive{};
+			primitive.FirstIndex    = FirstIndex;
+			primitive.IndexCount    = IndexCount;
+			Node->Mesh.Primitives.push_back(primitive);
+		}
+	}
+
+	if (NodeParent)
+	{
+		NodeParent->Children.push_back(Node);
+	}
+	else
+	{
+		M_Nodes.push_back(Node);
+	}
 }
+
+void VkGltfModel::LoadSkins()
+{
+	M_Skins.resize(M_Model.skins.size());
+
+	for (std::size_t i = 0; i < M_Model.skins.size(); i++)
+	{
+		tinygltf::Skin glTFSkin = M_Model.skins[i];
+
+		M_Skins[i].Name = glTFSkin.name;
+		M_Skins[i].SkeletonRoot = NodeFromIndex(glTFSkin.skeleton);
+
+
+		for (int jointIndex : glTFSkin.joints)
+		{
+			std::shared_ptr<Node> Node = NodeFromIndex(jointIndex);
+			if (Node)
+			{
+				M_Skins[i].Joints.push_back(Node);
+			}
+		}
+
+		if (glTFSkin.inverseBindMatrices > -1)
+		{
+			const tinygltf::Accessor&   Accessor   = M_Model.accessors[glTFSkin.inverseBindMatrices];
+			const tinygltf::BufferView& BufferView = M_Model.bufferViews[Accessor.bufferView];
+			const tinygltf::Buffer&     Buffer     = M_Model.buffers[BufferView.buffer];
+			M_Skins[i].InverseBindMatrices.resize(Accessor.count);
+			std::memcpy(M_Skins[i].InverseBindMatrices.data(), &Buffer.data[Accessor.byteOffset + BufferView.byteOffset], Accessor.count * sizeof(DirectX::XMFLOAT4X4));
+
+			M_Skins[i].Ssbo = CreateBuffer(vk::BufferUsageFlagBits::eStorageBuffer, sizeof(DirectX::XMFLOAT4X4) * M_Skins[i].InverseBindMatrices.size(), M_Skins[i].InverseBindMatrices.data());
+		}
+	}
+
+	const vk::DescriptorPoolSize PoolSize(vk::DescriptorType::eStorageBuffer, M_Skins.size());
+	const vk::DescriptorPoolCreateInfo DescriptorPoolCI = vk::DescriptorPoolCreateInfo({}, M_Skins.size(), 1, &PoolSize);
+	M_SkinsDescriptorPool = G_Device.createDescriptorPool(DescriptorPoolCI, nullptr, G_DLD);
+
+
+	for (std::size_t i = 0; i < M_Model.skins.size(); i++) {
+		const vk::DescriptorSetAllocateInfo DescriptorSetAI = vk::DescriptorSetAllocateInfo(M_SkinsDescriptorPool, 1, &G_SkinsDescriptorSetLayout);
+		M_Skins[i].DescriptorSet = G_Device.allocateDescriptorSets(DescriptorSetAI, G_DLD)[0];
+
+		const vk::DescriptorBufferInfo DescriptorBI = vk::DescriptorBufferInfo(std::get<0>(M_Skins[i].Ssbo), 0, vk::WholeSize);
+		const vk::WriteDescriptorSet Write = vk::WriteDescriptorSet(M_Skins[i].DescriptorSet, 0, 0, 1,vk::DescriptorType::eStorageBuffer, nullptr, &DescriptorBI, nullptr);
+		G_Device.updateDescriptorSets(Write, nullptr, G_DLD);
+	}
+
+}
+
+void VkGltfModel::LoadAnimations()
+{
+	M_Animations.resize(M_Model.animations.size());
+
+	for (std::size_t i = 0; i < M_Model.animations.size(); i++)
+	{
+		tinygltf::Animation GltfAnimation = M_Model.animations[i];
+		M_Animations[i].Name              = GltfAnimation.name;
+
+		M_Animations[i].Samplers.resize(GltfAnimation.samplers.size());
+		for (size_t j = 0; j < GltfAnimation.samplers.size(); j++)
+		{
+			tinygltf::AnimationSampler GlTFSampler = GltfAnimation.samplers[j];
+			AnimationSampler &         DstSampler  = M_Animations[i].Samplers[j];
+			DstSampler.Interpolation               = GlTFSampler.interpolation;
+
+			{
+				const tinygltf::Accessor&   Accessor   = M_Model.accessors[GlTFSampler.input];
+				const tinygltf::BufferView& BufferView = M_Model.bufferViews[Accessor.bufferView];
+				const tinygltf::Buffer &    Buffer     = M_Model.buffers[BufferView.buffer];
+				const void *                DataPtr    = &Buffer.data[Accessor.byteOffset + BufferView.byteOffset];
+				const float *               Buf        = static_cast<const float *>(DataPtr);
+				for (std::size_t Index = 0; Index < Accessor.count; Index++)
+				{
+					DstSampler.Inputs.push_back(Buf[Index]);
+				}
+				for (auto input : M_Animations[i].Samplers[j].Inputs)
+				{
+					if (input < M_Animations[i].Start)
+					{
+						M_Animations[i].Start = input;
+					};
+					if (input > M_Animations[i].End)
+					{
+						M_Animations[i].End = input;
+					}
+				}
+			}
+
+			{
+				const tinygltf::Accessor&   Accessor   = M_Model.accessors[GlTFSampler.output];
+				const tinygltf::BufferView& BufferView = M_Model.bufferViews[Accessor.bufferView];
+				const tinygltf::Buffer &    Buffer     = M_Model.buffers[BufferView.buffer];
+				const void *                DataPtr    = &Buffer.data[Accessor.byteOffset + BufferView.byteOffset];
+				switch (Accessor.type)
+				{
+				case TINYGLTF_TYPE_SCALAR:
+				{
+					const float *Buf = static_cast<const float*>(DataPtr);
+					for (size_t Index = 0; Index < Accessor.count; Index++)
+					{
+						DstSampler.OutputsVec4.push_back(DirectX::XMFLOAT4(Buf[Index], 0.0f, 0.0f, 0.0f));
+					}
+				}
+				break;
+				case TINYGLTF_TYPE_VEC2:
+				{
+					const DirectX::XMFLOAT2 *Buf = static_cast<const DirectX::XMFLOAT2*>(DataPtr);
+					for (size_t Index = 0; Index < Accessor.count; Index++)
+					{
+						DstSampler.OutputsVec4.push_back(DirectX::XMFLOAT4(Buf[Index].x, Buf[Index].y, 0.0f, 0.0f));
+					}
+				}
+				break;
+				case TINYGLTF_TYPE_VEC3:
+				{
+					const DirectX::XMFLOAT3 *Buf = static_cast<const DirectX::XMFLOAT3*>(DataPtr);
+					for (size_t Index = 0; Index < Accessor.count; Index++)
+					{
+						DstSampler.OutputsVec4.push_back(DirectX::XMFLOAT4(Buf[Index].x, Buf[Index].y, Buf[Index].z, 0.0f));
+					}
+				}
+				break;
+				case TINYGLTF_TYPE_VEC4:
+				{
+					const DirectX::XMFLOAT4 *Buf = static_cast<const DirectX::XMFLOAT4*>(DataPtr);
+					for (size_t Index = 0; Index < Accessor.count; Index++)
+					{
+						DstSampler.OutputsVec4.push_back(Buf[Index]);
+					}
+				}
+				break;
+				}
+			}
+		}
+
+		M_Animations[i].Channels.resize(GltfAnimation.channels.size());
+		for (size_t j = 0; j < GltfAnimation.channels.size(); j++)
+		{
+			tinygltf::AnimationChannel GltfChannel = GltfAnimation.channels[j];
+			AnimationChannel&          DstChannel  = M_Animations[i].Channels[j];
+			DstChannel.Path                        = GltfChannel.target_path;
+			DstChannel.SamplerIndex                = GltfChannel.sampler;
+			DstChannel.Node                        = NodeFromIndex(GltfChannel.target_node);
+		}
+	}
+}
+
+std::shared_ptr<VkGltfModel::Node> VkGltfModel::FindNode(std::shared_ptr<Node> Parent, std::uint32_t Index) const
+{
+	std::shared_ptr<Node> NodeFound = nullptr;
+	if (Parent->Index == Index)
+	{
+		return Parent;
+	}
+	for (auto &Child : Parent->Children)
+	{
+		NodeFound = FindNode(Child, Index);
+		if (NodeFound)
+		{
+			break;
+		}
+	}
+	return NodeFound;
+}
+
+std::shared_ptr<VkGltfModel::Node> VkGltfModel::NodeFromIndex(std::uint32_t Index) const
+{
+	std::shared_ptr<Node> NodeFound = nullptr;
+	for (auto &Node : M_Nodes)
+	{
+		NodeFound = FindNode(Node, Index);
+		if (NodeFound)
+		{
+			break;
+		}
+	}
+	return NodeFound;
+}
+
+DirectX::XMMATRIX VkGltfModel::GetNodeMatrix(std::shared_ptr<Node> Node)
+{
+
+	DirectX::XMMATRIX                  NodeMatrix = Node->GetLocalMatrix();
+	std::shared_ptr<VkGltfModel::Node> CurrentParent = Node->Parent;
+	while (CurrentParent)
+	{
+		NodeMatrix    = DirectX::XMMatrixMultiply(NodeMatrix, CurrentParent->GetLocalMatrix()) ;
+		CurrentParent = CurrentParent->Parent;
+	}
+	return NodeMatrix;
+}
+
+void VkGltfModel::UpdateJoints(std::shared_ptr<Node> Node)
+{
+	if (Node->Skin > -1)
+	{
+		const DirectX::XMMATRIX InverseTransform = DirectX::XMMatrixInverse(nullptr, GetNodeMatrix(Node));
+		const Skin&             NodeSkin         = M_Skins[Node->Skin];
+		const std::size_t       NumJoints        = NodeSkin.Joints.size();
+
+		std::vector<DirectX::XMFLOAT4X4> JointMatrices(NumJoints);
+		for (std::size_t i = 0; i < NumJoints; i++)
+		{
+			DirectX::XMMATRIX JointMatrix = DirectX::XMMatrixMultiply(DirectX::XMLoadFloat4x4(&NodeSkin.InverseBindMatrices[i]), GetNodeMatrix(NodeSkin.Joints[i]));
+			JointMatrix = DirectX::XMMatrixMultiply(JointMatrix, InverseTransform);
+			DirectX::XMStoreFloat4x4(&JointMatrices[i], JointMatrix);
+		}
+
+		const vk::DeviceSize ByteSize = JointMatrices.size() * sizeof(DirectX::XMFLOAT4X4);
+		DirectX::XMFLOAT4X4* Mapped = reinterpret_cast<DirectX::XMFLOAT4X4*>(G_Device.mapMemory(std::get<1>(NodeSkin.Ssbo), 0, ByteSize, vk::MemoryMapFlags(), G_DLD));
+		std::memcpy(Mapped, JointMatrices.data(), ByteSize);
+		G_Device.unmapMemory(std::get<1>(NodeSkin.Ssbo), G_DLD);
+	}
+
+	for (auto &Child : Node->Children)
+	{
+		UpdateJoints(Child);
+	}
+}
+
+void VkGltfModel::UpdateAnimation(float DeltaTime)
+{
+	Animation &Anim = M_Animations[0];
+	Anim.CurrentTime += DeltaTime;
+	while (Anim.CurrentTime > Anim.End)
+	{
+		Anim.CurrentTime -= (Anim.End - Anim.Start);
+	}
+
+	for (auto &Channel : Anim.Channels)
+	{
+		AnimationSampler &Sampler = Anim.Samplers[Channel.SamplerIndex];
+
+//		if (Sampler.Interpolation != "LINEAR")
+//		{
+//			std::cout << "This sample only supports linear interpolations\n";
+//			continue;
+//		}
+
+		for (std::size_t i = 0; i < Sampler.Inputs.size() - 1; i++)
+		{
+			if ((Anim.CurrentTime >= Sampler.Inputs[i]) && (Anim.CurrentTime <= Sampler.Inputs[i + 1]))
+			{
+				const float a = (Anim.CurrentTime - Sampler.Inputs[i]) / (Sampler.Inputs[i + 1] - Sampler.Inputs[i]);
+				if (Channel.Path == "translation")
+				{
+					const DirectX::XMVECTOR TranslationVec = DirectX::XMVectorLerp(DirectX::XMLoadFloat4(&Sampler.OutputsVec4[i]), DirectX::XMLoadFloat4(&Sampler.OutputsVec4[i + 1]), a);
+					DirectX::XMStoreFloat3(&Channel.Node->Translation, TranslationVec);
+
+				}
+				if (Channel.Path == "rotation")
+				{
+					const DirectX::XMVECTOR q1 = DirectX::XMVectorSet(Sampler.OutputsVec4[i].x, Sampler.OutputsVec4[i].y, Sampler.OutputsVec4[i].z, Sampler.OutputsVec4[i].w);
+					const DirectX::XMVECTOR q2 = DirectX::XMVectorSet(Sampler.OutputsVec4[i+1].x, Sampler.OutputsVec4[i+1].y, Sampler.OutputsVec4[i+1].z, Sampler.OutputsVec4[i+1].w);
+
+					const DirectX::XMVECTOR RotationVec = DirectX::XMVector4Normalize(DirectX::XMQuaternionSlerp(q1, q2, a));
+					DirectX::XMStoreFloat4(&Channel.Node->Rotation, RotationVec);
+				}
+				if (Channel.Path == "scale")
+				{
+					const DirectX::XMVECTOR ScaleVec = DirectX::XMVectorLerp(DirectX::XMLoadFloat4(&Sampler.OutputsVec4[i]), DirectX::XMLoadFloat4(&Sampler.OutputsVec4[i + 1]), a);
+					DirectX::XMStoreFloat3(&Channel.Node->Scale, ScaleVec);
+				}
+
+				break;
+			}
+		}
+	}
+
+	for (auto &Node : M_Nodes)
+	{
+		UpdateJoints(Node);
+	}
+}
+
+
+void VkGltfModel::Shutdown()
+{
+	if (G_Device) {
+
+		if (M_SkinsDescriptorPool) {
+			G_Device.destroyDescriptorPool(M_SkinsDescriptorPool, nullptr, G_DLD);
+			M_SkinsDescriptorPool = nullptr;
+		}
+
+		for (std::size_t i = 0; i < M_Skins.size(); i++) {
+			if (std::get<1>(M_Skins[i].Ssbo)) {
+				G_Device.freeMemory(std::get<1>(M_Skins[i].Ssbo), nullptr, G_DLD);
+				std::get<1>(M_Skins[i].Ssbo) = nullptr;
+			}
+			if (std::get<0>(M_Skins[i].Ssbo)) {
+				G_Device.destroyBuffer(std::get<0>(M_Skins[i].Ssbo), nullptr, G_DLD);
+				std::get<0>(M_Skins[i].Ssbo) = nullptr;
+			}
+		}
+
+		if (std::get<1>(M_IndexBufferTuple)) {
+			G_Device.freeMemory(std::get<1>(M_IndexBufferTuple), nullptr, G_DLD);
+			std::get<1>(M_IndexBufferTuple) = nullptr;
+		}
+		if (std::get<1>(M_VertexBufferTuple)) {
+			G_Device.freeMemory(std::get<1>(M_VertexBufferTuple), nullptr, G_DLD);
+			std::get<1>(M_VertexBufferTuple) = nullptr;
+		}
+		if (std::get<0>(M_IndexBufferTuple)) {
+			G_Device.destroyBuffer(std::get<0>(M_IndexBufferTuple), nullptr, G_DLD);
+			std::get<0>(M_IndexBufferTuple) = nullptr;
+		}
+		if (std::get<0>(M_VertexBufferTuple)) {
+			G_Device.destroyBuffer(std::get<0>(M_VertexBufferTuple), nullptr, G_DLD);
+			std::get<0>(M_VertexBufferTuple) = nullptr;
+		}
+	}
+}
+
+
+
+
+
+
+
 
