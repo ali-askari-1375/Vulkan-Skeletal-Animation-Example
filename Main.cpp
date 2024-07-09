@@ -1637,7 +1637,7 @@ void InitImGui()
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
 
-	G_ConsolasFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\consola.ttf", 20.0f, NULL, io.Fonts->GetGlyphRangesDefault());
+	//G_ConsolasFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\consola.ttf", 20.0f, NULL, io.Fonts->GetGlyphRangesDefault());
 
 	ImGui_ImplWin32_Init(G_Hwnd);
 
