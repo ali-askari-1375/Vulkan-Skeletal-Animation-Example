@@ -467,8 +467,8 @@ bool Render(bool bClearOnly)
 		CommandBuffer.setViewport(0, vk::Viewport{0.0f, 0.0f, float(G_SwapchainExtent.width), float(G_SwapchainExtent.height), 0.0f, 1.0f}, G_DLD);
 		CommandBuffer.setScissor(0, vk::Rect2D{vk::Offset2D{0, 0}, vk::Extent2D{G_SwapchainExtent.width, G_SwapchainExtent.height}}, G_DLD);
 
-		const DirectX::XMMATRIX MatProj = DirectX::XMMatrixPerspectiveFovRH(-DirectX::XMConvertToRadians(35), float(G_SwapchainExtent.width) / float(G_SwapchainExtent.height), 0.1f, 10000);
-		const DirectX::XMMATRIX MatView = DirectX::XMMatrixLookAtRH(DirectX::XMVectorSet(-100.0f, 150.0f, 400.0f, 0.0f), DirectX::XMVectorSet(0.0f, 80.0f, 0.0f, 0.0f), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
+		const DirectX::XMMATRIX MatProj = DirectX::XMMatrixPerspectiveFovRH(-DirectX::XMConvertToRadians(35), float(G_SwapchainExtent.width) / float(G_SwapchainExtent.height), 0.01f, 100);
+		const DirectX::XMMATRIX MatView = DirectX::XMMatrixLookAtRH(DirectX::XMVectorSet(-0.0f, 1.5f, 4.0f, 0.0f), DirectX::XMVectorSet(0.0f, 0.8f, 0.0f, 0.0f), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
 		const DirectX::XMMATRIX MatProjView = DirectX::XMMatrixMultiply(MatView, MatProj);
 		DirectX::XMFLOAT4X4 MatProjViewDest;
 		DirectX::XMStoreFloat4x4(&MatProjViewDest, MatProjView);
@@ -485,7 +485,7 @@ bool Render(bool bClearOnly)
 
 			if (Node->Skin < 0) continue;
 
-			const DirectX::XMMATRIX MatModel = DirectX::XMMatrixIdentity();
+			const DirectX::XMMATRIX MatModel = DirectX::XMMatrixRotationY(DirectX::XMConvertToRadians(30.0f));
 			DirectX::XMFLOAT4X4 MatModelDest;
 			DirectX::XMStoreFloat4x4(&MatModelDest, MatModel);
 
