@@ -92,6 +92,7 @@ public:
 		std::vector<DirectX::XMFLOAT4X4>         InverseBindMatrices;
 		std::vector<std::shared_ptr<Node>>       Joints;
 		std::tuple<vk::Buffer, vk::DeviceMemory> Ssbo;
+		void*                                    SsboMapped = nullptr;
 		vk::DescriptorSet                        DescriptorSet;
 	};
 
@@ -2142,6 +2143,7 @@ void VkGltfModel::LoadSkins()
 			LoadAccessorData<float, 16>(DataPtr, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(M_Skins[i].InverseBindMatrices.data()));
 
 			M_Skins[i].Ssbo = CreateBuffer(vk::BufferUsageFlagBits::eStorageBuffer, sizeof(DirectX::XMFLOAT4X4) * M_Skins[i].InverseBindMatrices.size(), M_Skins[i].InverseBindMatrices.data());
+			M_Skins[i].SsboMapped = G_Device.mapMemory(std::get<1>(M_Skins[i].Ssbo), 0, vk::WholeSize, {}, G_DLD);
 		}
 	}
 
@@ -2289,9 +2291,7 @@ void VkGltfModel::UpdateJoints(std::shared_ptr<Node> Node)
 		}
 
 		const vk::DeviceSize ByteSize = JointMatrices.size() * sizeof(DirectX::XMFLOAT4X4);
-		DirectX::XMFLOAT4X4* Mapped = reinterpret_cast<DirectX::XMFLOAT4X4*>(G_Device.mapMemory(std::get<1>(NodeSkin.Ssbo), 0, ByteSize, vk::MemoryMapFlags(), G_DLD));
-		std::memcpy(Mapped, JointMatrices.data(), ByteSize);
-		G_Device.unmapMemory(std::get<1>(NodeSkin.Ssbo), G_DLD);
+		std::memcpy(NodeSkin.SsboMapped, JointMatrices.data(), ByteSize);
 	}
 
 	for (auto &Child : Node->Children)
@@ -2366,6 +2366,12 @@ void VkGltfModel::Shutdown()
 		}
 
 		for (std::size_t i = 0; i < M_Skins.size(); i++) {
+
+			if (M_Skins[i].SsboMapped) {
+				G_Device.unmapMemory(std::get<1>(M_Skins[i].Ssbo), G_DLD);
+				M_Skins[i].SsboMapped = nullptr;
+			}
+
 			if (std::get<1>(M_Skins[i].Ssbo)) {
 				G_Device.freeMemory(std::get<1>(M_Skins[i].Ssbo), nullptr, G_DLD);
 				std::get<1>(M_Skins[i].Ssbo) = nullptr;
