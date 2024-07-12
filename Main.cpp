@@ -33,8 +33,8 @@
 
 ///////////////////////////////////////////////////////////////////////////
 
-constexpr std::uint32_t G_PreferredImageCount = 3;
-constexpr std::uint32_t G_MaxFramesInFlight = 3;
+constexpr std::uint32_t G_PreferredImageCount = 2;
+constexpr std::uint32_t G_MaxFramesInFlight = 2;
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -555,7 +555,7 @@ bool Render(bool bClearOnly)
 
 				CommandBuffer.pushConstants(G_PipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(DirectX::XMFLOAT4X4), &MatProjViewDest, G_DLD);
 				CommandBuffer.pushConstants(G_PipelineLayout, vk::ShaderStageFlagBits::eVertex, sizeof(DirectX::XMFLOAT4X4), sizeof(DirectX::XMFLOAT4X4), &MatModelDest, G_DLD);
-				CommandBuffer.pushConstants(G_PipelineLayout, vk::ShaderStageFlagBits::eFragment, sizeof(DirectX::XMFLOAT4X4) + sizeof(DirectX::XMFLOAT4X4), sizeof(DirectX::XMFLOAT3), DirectX::Colors::SpringGreen.f, G_DLD);
+				CommandBuffer.pushConstants(G_PipelineLayout, vk::ShaderStageFlagBits::eFragment, sizeof(DirectX::XMFLOAT4X4) + sizeof(DirectX::XMFLOAT4X4), sizeof(DirectX::XMFLOAT3), DirectX::Colors::SkyBlue.f, G_DLD);
 
 				CommandBuffer.drawIndexed(Primitive.IndexCount, 1, Primitive.FirstIndex, Primitive.FirstVertex, 0, G_DLD);
 			}
@@ -906,7 +906,7 @@ void InitPhysicalDevice()
 	if (!SuitablePhysicalDevices.empty()) {
 		for (auto Item : SuitablePhysicalDevices) {
 			auto Props = Item.getProperties(G_DLD);
-			if (Props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+			if (Props.deviceType == vk::PhysicalDeviceType::eIntegratedGpu) {
 				G_PhysicalDevice = Item;
 				break;
 			}
@@ -1110,9 +1110,9 @@ void InitSurface()
 		throw std::runtime_error("The surface doesn't support any present mode");
 
 	G_SurfacePresentMode = PresentModes[0];
-	if (G_SurfacePresentMode != vk::PresentModeKHR::eMailbox) {
+	if (G_SurfacePresentMode != vk::PresentModeKHR::eFifo) {
 		for (auto& PresentMode : PresentModes) {
-			if (PresentMode == vk::PresentModeKHR::eMailbox) {
+			if (PresentMode == vk::PresentModeKHR::eFifo) {
 				G_SurfacePresentMode = PresentMode;
 				break;
 			}
@@ -1120,7 +1120,7 @@ void InitSurface()
 	}
 	if (G_SurfacePresentMode != vk::PresentModeKHR::eMailbox && G_SurfacePresentMode != vk::PresentModeKHR::eFifo) {
 		for (auto& PresentMode : PresentModes) {
-			if (PresentMode == vk::PresentModeKHR::eFifo) {
+			if (PresentMode == vk::PresentModeKHR::eMailbox) {
 				G_SurfacePresentMode = PresentMode;
 				break;
 			}
