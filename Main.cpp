@@ -31,6 +31,7 @@
 #include <backends/imgui_impl_win32.h>
 #include <backends/imgui_impl_vulkan.h>
 
+///////////////////////////////////////////////////////////////////////////
 
 class VkGltfModel final
 {
@@ -40,6 +41,7 @@ public:
 	{
 		uint32_t FirstIndex;
 		uint32_t IndexCount;
+		uint32_t FirstVertex;
 	};
 
 	struct Mesh
@@ -118,8 +120,6 @@ public:
 		float                         CurrentTime{0.0f};
 	};
 
-
-
 public:
 	VkGltfModel();
 	~VkGltfModel();
@@ -138,6 +138,63 @@ public:
 
 	void Shutdown();
 
+	template<typename _OutputElementType, std::size_t _OutputElementCount>
+	void LoadAccessorData(const std::uint8_t *InputDataPtr, std::size_t AccessorCount, int AccessorType, int AccessorComponentType, _OutputElementType *OutputDataPtr)
+	{
+		const std::size_t OutputStep = _OutputElementCount;
+		std::size_t InputStep = 0;
+		switch(AccessorType)
+		{
+		case TINYGLTF_TYPE_SCALAR: InputStep = 1; break;
+		case TINYGLTF_TYPE_VEC2: InputStep = 2; break;
+		case TINYGLTF_TYPE_VEC3: InputStep = 3; break;
+		case TINYGLTF_TYPE_VEC4: InputStep = 4; break;
+		case TINYGLTF_TYPE_MAT2: InputStep = 4; break;
+		case TINYGLTF_TYPE_MAT3: InputStep = 9; break;
+		case TINYGLTF_TYPE_MAT4: InputStep = 16; break;
+		}
+
+		const std::size_t CopyCount = std::min(InputStep, OutputStep);
+
+		for (std::size_t i = 0; i < AccessorCount; i++) {
+			switch(AccessorComponentType)
+			{
+			case TINYGLTF_COMPONENT_TYPE_BYTE:
+				for (std::size_t j = 0; j < CopyCount; j++)
+					OutputDataPtr[(i*OutputStep) + j] = static_cast<_OutputElementType>(reinterpret_cast<const std::int8_t*>(InputDataPtr)[(i*InputStep)+j]);
+				break;
+			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+				for (std::size_t j = 0; j < CopyCount; j++)
+					OutputDataPtr[(i*OutputStep) + j] = static_cast<_OutputElementType>(reinterpret_cast<const std::uint8_t*>(InputDataPtr)[(i*InputStep)+j]);
+				break;
+			case TINYGLTF_COMPONENT_TYPE_SHORT:
+				for (std::size_t j = 0; j < CopyCount; j++)
+					OutputDataPtr[(i*OutputStep) + j] = static_cast<_OutputElementType>(reinterpret_cast<const std::int16_t*>(InputDataPtr)[(i*InputStep)+j]);
+				break;
+			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+				for (std::size_t j = 0; j < CopyCount; j++)
+					OutputDataPtr[(i*OutputStep) + j] = static_cast<_OutputElementType>(reinterpret_cast<const std::uint16_t*>(InputDataPtr)[(i*InputStep)+j]);
+				break;
+			case TINYGLTF_COMPONENT_TYPE_INT:
+				for (std::size_t j = 0; j < CopyCount; j++)
+					OutputDataPtr[(i*OutputStep) + j] = static_cast<_OutputElementType>(reinterpret_cast<const std::int32_t*>(InputDataPtr)[(i*InputStep)+j]);
+				break;
+			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+				for (std::size_t j = 0; j < CopyCount; j++)
+					OutputDataPtr[(i*OutputStep) + j] = static_cast<_OutputElementType>(reinterpret_cast<const std::uint32_t*>(InputDataPtr)[(i*InputStep)+j]);
+				break;
+			case TINYGLTF_COMPONENT_TYPE_FLOAT:
+				for (std::size_t j = 0; j < CopyCount; j++)
+					OutputDataPtr[(i*OutputStep) + j] = static_cast<_OutputElementType>(reinterpret_cast<const float*>(InputDataPtr)[(i*InputStep)+j]);
+				break;
+			case TINYGLTF_COMPONENT_TYPE_DOUBLE:
+				for (std::size_t j = 0; j < CopyCount; j++)
+					OutputDataPtr[(i*OutputStep) + j] = static_cast<_OutputElementType>(reinterpret_cast<const double*>(InputDataPtr)[(i*InputStep)+j]);
+				break;
+			}
+		}
+	}
+
 public:
 	tinygltf::Model M_Model;
 	std::vector<std::shared_ptr<Node>> M_Nodes;
@@ -151,6 +208,7 @@ public:
 	vk::DescriptorPool M_SkinsDescriptorPool = {};
 };
 
+///////////////////////////////////////////////////////////////////////////
 
 void InitWindow();
 void ShutdownWindow();
@@ -190,6 +248,7 @@ void InitImGui();
 void ShutdownImGui();
 
 ///////////////////////////////////////////////////////////////////////////
+
 void InitPipeline();
 void ShutdownPipeline();
 
@@ -198,9 +257,7 @@ void ShutdownModel();
 
 LRESULT CALLBACK WndProc(HWND Hwnd, UINT Msg, WPARAM Wparam, LPARAM Lparam);
 
-
-
-
+///////////////////////////////////////////////////////////////////////////
 
 HINSTANCE G_Hinstance = {};
 HWND G_Hwnd = {};
@@ -265,14 +322,13 @@ vk::DescriptorPool G_ImguiDescriptorPool = {};
 ImGuiContext *G_ImGuiContext = {};
 ImFont *G_ConsolasFont = {};
 
-
-////////////////////////////////////////////////////
 vk::DescriptorSetLayout G_SkinsDescriptorSetLayout = {};
 vk::PipelineLayout G_PipelineLayout = {};
 vk::Pipeline G_Pipeline = {};
 
 VkGltfModel G_GltfModel;
 
+////////////////////////////////////////////////////
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLine, int nCmdShow)
 {
@@ -498,7 +554,7 @@ bool Render(bool bClearOnly)
 				CommandBuffer.pushConstants(G_PipelineLayout, vk::ShaderStageFlagBits::eVertex, sizeof(DirectX::XMFLOAT4X4), sizeof(DirectX::XMFLOAT4X4), &MatModelDest, G_DLD);
 				CommandBuffer.pushConstants(G_PipelineLayout, vk::ShaderStageFlagBits::eFragment, sizeof(DirectX::XMFLOAT4X4) + sizeof(DirectX::XMFLOAT4X4), sizeof(DirectX::XMFLOAT3), DirectX::Colors::SpringGreen.f, G_DLD);
 
-				CommandBuffer.drawIndexed(Primitive.IndexCount, 1, Primitive.FirstIndex, 0, 0, G_DLD);
+				CommandBuffer.drawIndexed(Primitive.IndexCount, 1, Primitive.FirstIndex, Primitive.FirstVertex, 0, G_DLD);
 			}
 		}
 
@@ -1842,7 +1898,7 @@ bool VkGltfModel::LoadFromFile(std::string FileName)
 	{
 		UpdateJoints(Node);
 	}
-	UpdateAnimation(0.1);
+	UpdateAnimation(0.1f);
 
 
 	M_VertexBufferTuple = CreateBuffer(vk::BufferUsageFlagBits::eVertexBuffer, HostVertexBuffer.size() * sizeof(Vertex), HostVertexBuffer.data(), true);
@@ -1892,822 +1948,154 @@ void VkGltfModel::LoadNode(const tinygltf::Node &InputNode,  std::shared_ptr<VkG
 		{
 			const tinygltf::Primitive &GlTFPrimitive = Mesh.primitives[i];
 			std::uint32_t              FirstIndex    = static_cast<std::uint32_t>(HostIndexBuffer.size());
-			std::uint32_t              VertexStart   = static_cast<std::uint32_t>(HostVertexBuffer.size());
+			std::uint32_t              FirstVertex   = static_cast<std::uint32_t>(HostVertexBuffer.size());
 			std::uint32_t              IndexCount    = 0;
+			std::size_t                VertexCount         = 0;
 			std::vector<Vertex>        LocalVertexBuffer;
+			std::vector<std::uint32_t> LocalIndexBuffer;
 
+			if (GlTFPrimitive.attributes.find("POSITION") != GlTFPrimitive.attributes.end())
 			{
-				const float*         PositionBuffer      = nullptr;
-				const float*         NormalsBuffer       = nullptr;
-				const float*         TexCoordsBuffer     = nullptr;
-				const std::uint32_t* JointIndicesBuffer0 = nullptr;
-				const float*         JointWeightsBuffer0 = nullptr;
-				const std::uint32_t* JointIndicesBuffer1 = nullptr;
-				const float*         JointWeightsBuffer1 = nullptr;
-				std::size_t          VertexCount         = 0;
+				const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("POSITION")->second];
+				const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+				auto PositionBufferDataPtr           = reinterpret_cast<const std::uint8_t*>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+				VertexCount                          = Accessor.count;
 
+				LocalVertexBuffer.reserve(VertexCount);
 
-				if (GlTFPrimitive.attributes.find("POSITION") != GlTFPrimitive.attributes.end())
-				{
-					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("POSITION")->second];
-					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
-					PositionBuffer                       = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
-					VertexCount                          = Accessor.count;
+				std::vector<DirectX::XMFLOAT3> LocalPositionBuffer;
+				LocalPositionBuffer.resize(VertexCount);
+				LoadAccessorData<float, 3>(PositionBufferDataPtr, VertexCount, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(LocalPositionBuffer.data()));
 
-					LocalVertexBuffer.reserve(VertexCount);
+				for (std::size_t v = 0; v < VertexCount; v++) {
+					LocalVertexBuffer.emplace_back(Vertex{});
+					Vertex& Vtx = LocalVertexBuffer.back();
+					std::memset(&Vtx, 0, sizeof(Vertex));
 
-					for (std::size_t v = 0; v < VertexCount; v++) {
-						LocalVertexBuffer.emplace_back(Vertex{});
-						Vertex& Vtx = LocalVertexBuffer.back();
-
-						std::memset(&Vtx, 0, sizeof(Vertex));
-
-						switch(Accessor.componentType)
-						{
-						case TINYGLTF_COMPONENT_TYPE_FLOAT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.Pos.x = PositionBuffer[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.Pos.x = PositionBuffer[(v*2)+0];
-								Vtx.Pos.y = PositionBuffer[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.Pos.x = PositionBuffer[(v*3)+0];
-								Vtx.Pos.y = PositionBuffer[(v*3)+1];
-								Vtx.Pos.z = PositionBuffer[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.Pos.x = PositionBuffer[(v*4)+0];
-								Vtx.Pos.y = PositionBuffer[(v*4)+1];
-								Vtx.Pos.z = PositionBuffer[(v*4)+2];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.Pos.x = reinterpret_cast<const double*>(PositionBuffer)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.Pos.x = reinterpret_cast<const double*>(PositionBuffer)[(v*2)+0];
-								Vtx.Pos.y = reinterpret_cast<const double*>(PositionBuffer)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.Pos.x = reinterpret_cast<const double*>(PositionBuffer)[(v*3)+0];
-								Vtx.Pos.y = reinterpret_cast<const double*>(PositionBuffer)[(v*3)+1];
-								Vtx.Pos.z = reinterpret_cast<const double*>(PositionBuffer)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.Pos.x = reinterpret_cast<const double*>(PositionBuffer)[(v*4)+0];
-								Vtx.Pos.y = reinterpret_cast<const double*>(PositionBuffer)[(v*4)+1];
-								Vtx.Pos.z = reinterpret_cast<const double*>(PositionBuffer)[(v*4)+2];
-								break;
-							}
-							break;
-						}
-					}
-
-				} else {
-					continue;
+					Vtx.Pos = LocalPositionBuffer[v];
 				}
 
-				if (GlTFPrimitive.attributes.find("NORMAL") != GlTFPrimitive.attributes.end())
-				{
-					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("NORMAL")->second];
-					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
-					NormalsBuffer                        = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
-
-					for (std::size_t v = 0; v < VertexCount; v++) {
-						Vertex& Vtx = LocalVertexBuffer[v];
-
-						switch(Accessor.componentType)
-						{
-						case TINYGLTF_COMPONENT_TYPE_FLOAT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.Normal.x = NormalsBuffer[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.Normal.x = NormalsBuffer[(v*2)+0];
-								Vtx.Normal.y = NormalsBuffer[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.Normal.x = NormalsBuffer[(v*3)+0];
-								Vtx.Normal.y = NormalsBuffer[(v*3)+1];
-								Vtx.Normal.z = NormalsBuffer[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.Normal.x = NormalsBuffer[(v*4)+0];
-								Vtx.Normal.y = NormalsBuffer[(v*4)+1];
-								Vtx.Normal.z = NormalsBuffer[(v*4)+2];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.Normal.x = reinterpret_cast<const double*>(NormalsBuffer)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.Normal.x = reinterpret_cast<const double*>(NormalsBuffer)[(v*2)+0];
-								Vtx.Normal.y = reinterpret_cast<const double*>(NormalsBuffer)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.Normal.x = reinterpret_cast<const double*>(NormalsBuffer)[(v*3)+0];
-								Vtx.Normal.y = reinterpret_cast<const double*>(NormalsBuffer)[(v*3)+1];
-								Vtx.Normal.z = reinterpret_cast<const double*>(NormalsBuffer)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.Normal.x = reinterpret_cast<const double*>(NormalsBuffer)[(v*4)+0];
-								Vtx.Normal.y = reinterpret_cast<const double*>(NormalsBuffer)[(v*4)+1];
-								Vtx.Normal.z = reinterpret_cast<const double*>(NormalsBuffer)[(v*4)+2];
-								break;
-							}
-							break;
-						}
-					}
-				}
-
-
-				if (GlTFPrimitive.attributes.find("TEXCOORD_0") != GlTFPrimitive.attributes.end())
-				{
-					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("TEXCOORD_0")->second];
-					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
-					TexCoordsBuffer                      = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
-
-					for (std::size_t v = 0; v < VertexCount; v++) {
-						Vertex& Vtx = LocalVertexBuffer[v];
-
-						switch(Accessor.componentType)
-						{
-						case TINYGLTF_COMPONENT_TYPE_FLOAT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.Uv.x = TexCoordsBuffer[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.Uv.x = TexCoordsBuffer[(v*2)+0];
-								Vtx.Uv.y = TexCoordsBuffer[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.Uv.x = TexCoordsBuffer[(v*3)+0];
-								Vtx.Uv.y = TexCoordsBuffer[(v*3)+1];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.Uv.x = TexCoordsBuffer[(v*4)+0];
-								Vtx.Uv.y = TexCoordsBuffer[(v*4)+1];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.Uv.x = reinterpret_cast<const double*>(TexCoordsBuffer)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.Uv.x = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*2)+0];
-								Vtx.Uv.y = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.Uv.x = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*3)+0];
-								Vtx.Uv.y = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*3)+1];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.Uv.x = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*4)+0];
-								Vtx.Uv.y = reinterpret_cast<const double*>(TexCoordsBuffer)[(v*4)+1];
-								break;
-							}
-							break;
-						}
-					}
-				}
-
-				if (GlTFPrimitive.attributes.find("JOINTS_0") != GlTFPrimitive.attributes.end())
-				{
-					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("JOINTS_0")->second];
-					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
-					JointIndicesBuffer0                  = reinterpret_cast<const uint32_t *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
-
-					for (std::size_t v = 0; v < VertexCount; v++) {
-						Vertex& Vtx = LocalVertexBuffer[v];
-
-						switch(Accessor.componentType)
-						{
-						case TINYGLTF_COMPONENT_TYPE_BYTE:
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*2)+0];
-								Vtx.JointIndices0.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*3)+0];
-								Vtx.JointIndices0.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*3)+1];
-								Vtx.JointIndices0.z = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*4)+0];
-								Vtx.JointIndices0.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*4)+1];
-								Vtx.JointIndices0.z = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*4)+2];
-								Vtx.JointIndices0.w = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_SHORT:
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*2)+0];
-								Vtx.JointIndices0.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*3)+0];
-								Vtx.JointIndices0.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*3)+1];
-								Vtx.JointIndices0.z = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*4)+0];
-								Vtx.JointIndices0.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*4)+1];
-								Vtx.JointIndices0.z = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*4)+2];
-								Vtx.JointIndices0.w = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_INT:
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*2)+0];
-								Vtx.JointIndices0.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*3)+0];
-								Vtx.JointIndices0.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*3)+1];
-								Vtx.JointIndices0.z = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointIndices0.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*4)+0];
-								Vtx.JointIndices0.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*4)+1];
-								Vtx.JointIndices0.z = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*4)+2];
-								Vtx.JointIndices0.w = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						}
-					}
-				}
-
-				if (GlTFPrimitive.attributes.find("WEIGHTS_0") != GlTFPrimitive.attributes.end())
-				{
-					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("WEIGHTS_0")->second];
-					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
-					JointWeightsBuffer0                  = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
-
-					for (std::size_t v = 0; v < VertexCount; v++) {
-						Vertex& Vtx = LocalVertexBuffer[v];
-
-
-						switch(Accessor.componentType)
-						{
-						case TINYGLTF_COMPONENT_TYPE_FLOAT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights0.x = JointWeightsBuffer0[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights0.x = JointWeightsBuffer0[(v*2)+0];
-								Vtx.JointWeights0.y = JointWeightsBuffer0[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights0.x = JointWeightsBuffer0[(v*3)+0];
-								Vtx.JointWeights0.y = JointWeightsBuffer0[(v*3)+1];
-								Vtx.JointWeights0.z = JointWeightsBuffer0[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights0.x = JointWeightsBuffer0[(v*4)+0];
-								Vtx.JointWeights0.y = JointWeightsBuffer0[(v*4)+1];
-								Vtx.JointWeights0.z = JointWeightsBuffer0[(v*4)+2];
-								Vtx.JointWeights0.w = JointWeightsBuffer0[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights0.x = reinterpret_cast<const double*>(JointWeightsBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights0.x = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*2)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights0.x = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*3)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*3)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights0.x = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*4)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*4)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*4)+2];
-								Vtx.JointWeights0.w = reinterpret_cast<const double*>(JointWeightsBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_BYTE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*2)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*3)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*3)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*4)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*4)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*4)+2];
-								Vtx.JointWeights0.w = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*2)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*3)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*3)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*4)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*4)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*4)+2];
-								Vtx.JointWeights0.w = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_SHORT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*2)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*3)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*3)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*4)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*4)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*4)+2];
-								Vtx.JointWeights0.w = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*2)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*3)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*3)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*4)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*4)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*4)+2];
-								Vtx.JointWeights0.w = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_INT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*2)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*3)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*3)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*4)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*4)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*4)+2];
-								Vtx.JointWeights0.w = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*2)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*3)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*3)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights0.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*4)+0];
-								Vtx.JointWeights0.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*4)+1];
-								Vtx.JointWeights0.z = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*4)+2];
-								Vtx.JointWeights0.w = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer0)[(v*4)+3];
-								break;
-							}
-							break;
-						}
-					}
-				}
-
-				if (GlTFPrimitive.attributes.find("JOINTS_1") != GlTFPrimitive.attributes.end())
-				{
-					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("JOINTS_1")->second];
-					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
-					JointIndicesBuffer1                  = reinterpret_cast<const uint32_t *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
-
-					for (std::size_t v = 0; v < VertexCount; v++) {
-						Vertex& Vtx = LocalVertexBuffer[v];
-
-						switch(Accessor.componentType)
-						{
-						case TINYGLTF_COMPONENT_TYPE_BYTE:
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*2)+0];
-								Vtx.JointIndices1.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*3)+0];
-								Vtx.JointIndices1.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*3)+1];
-								Vtx.JointIndices1.z = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*4)+0];
-								Vtx.JointIndices1.y = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*4)+1];
-								Vtx.JointIndices1.z = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*4)+2];
-								Vtx.JointIndices1.w = reinterpret_cast<const std::uint8_t*>(JointIndicesBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_SHORT:
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*2)+0];
-								Vtx.JointIndices1.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*3)+0];
-								Vtx.JointIndices1.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*3)+1];
-								Vtx.JointIndices1.z = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*4)+0];
-								Vtx.JointIndices1.y = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*4)+1];
-								Vtx.JointIndices1.z = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*4)+2];
-								Vtx.JointIndices1.w = reinterpret_cast<const std::uint16_t*>(JointIndicesBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_INT:
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*2)+0];
-								Vtx.JointIndices1.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*3)+0];
-								Vtx.JointIndices1.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*3)+1];
-								Vtx.JointIndices1.z = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointIndices1.x = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*4)+0];
-								Vtx.JointIndices1.y = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*4)+1];
-								Vtx.JointIndices1.z = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*4)+2];
-								Vtx.JointIndices1.w = reinterpret_cast<const std::uint32_t*>(JointIndicesBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						}
-					}
-				}
-
-				if (GlTFPrimitive.attributes.find("WEIGHTS_1") != GlTFPrimitive.attributes.end())
-				{
-					const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("WEIGHTS_1")->second];
-					const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
-					JointWeightsBuffer1                  = reinterpret_cast<const float *>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
-
-					for (std::size_t v = 0; v < VertexCount; v++) {
-						Vertex& Vtx = LocalVertexBuffer[v];
-
-						switch(Accessor.componentType)
-						{
-						case TINYGLTF_COMPONENT_TYPE_FLOAT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights1.x = JointWeightsBuffer1[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights1.x = JointWeightsBuffer1[(v*2)+0];
-								Vtx.JointWeights1.y = JointWeightsBuffer1[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights1.x = JointWeightsBuffer1[(v*3)+0];
-								Vtx.JointWeights1.y = JointWeightsBuffer1[(v*3)+1];
-								Vtx.JointWeights1.z = JointWeightsBuffer1[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights1.x = JointWeightsBuffer1[(v*4)+0];
-								Vtx.JointWeights1.y = JointWeightsBuffer1[(v*4)+1];
-								Vtx.JointWeights1.z = JointWeightsBuffer1[(v*4)+2];
-								Vtx.JointWeights1.w = JointWeightsBuffer1[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_DOUBLE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights1.x = reinterpret_cast<const double*>(JointWeightsBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights1.x = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*2)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights1.x = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*3)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*3)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights1.x = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*4)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*4)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*4)+2];
-								Vtx.JointWeights1.w = reinterpret_cast<const double*>(JointWeightsBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_BYTE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*2)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*3)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*3)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*4)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*4)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*4)+2];
-								Vtx.JointWeights1.w = reinterpret_cast<const std::int8_t*>(JointWeightsBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*2)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*3)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*3)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*4)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*4)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*4)+2];
-								Vtx.JointWeights1.w = reinterpret_cast<const std::uint8_t*>(JointWeightsBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_SHORT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*2)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*3)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*3)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*4)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*4)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*4)+2];
-								Vtx.JointWeights1.w = reinterpret_cast<const std::int16_t*>(JointWeightsBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*2)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*3)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*3)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*4)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*4)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*4)+2];
-								Vtx.JointWeights1.w = reinterpret_cast<const std::uint16_t*>(JointWeightsBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_INT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*2)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*3)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*3)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*4)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*4)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*4)+2];
-								Vtx.JointWeights1.w = reinterpret_cast<const std::int32_t*>(JointWeightsBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-							switch(Accessor.type)
-							{
-							case TINYGLTF_TYPE_SCALAR:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[v];
-								break;
-							case TINYGLTF_TYPE_VEC2:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*2)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*2)+1];
-								break;
-							case TINYGLTF_TYPE_VEC3:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*3)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*3)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*3)+2];
-								break;
-							case TINYGLTF_TYPE_VEC4:
-								Vtx.JointWeights1.x = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*4)+0];
-								Vtx.JointWeights1.y = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*4)+1];
-								Vtx.JointWeights1.z = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*4)+2];
-								Vtx.JointWeights1.w = reinterpret_cast<const std::uint32_t*>(JointWeightsBuffer1)[(v*4)+3];
-								break;
-							}
-							break;
-						}
-					}
-				}
-
-				std::copy(LocalVertexBuffer.begin(), LocalVertexBuffer.end(), std::back_inserter(HostVertexBuffer));
+			} else {
+				continue;
 			}
 
+			if (GlTFPrimitive.attributes.find("NORMAL") != GlTFPrimitive.attributes.end())
 			{
-				const tinygltf::Accessor &  Accessor   = M_Model.accessors[GlTFPrimitive.indices];
-				const tinygltf::BufferView& BufferView = M_Model.bufferViews[Accessor.bufferView];
-				const tinygltf::Buffer&     Buffer     = M_Model.buffers[BufferView.buffer];
+				const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("NORMAL")->second];
+				const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+				auto NormalBufferDataPtr            = reinterpret_cast<const std::uint8_t*>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
 
-				IndexCount += static_cast<std::uint32_t>(Accessor.count);
+				std::vector<DirectX::XMFLOAT3> LocalNormalBuffer;
+				LocalNormalBuffer.resize(Accessor.count);
+				LoadAccessorData<float, 3>(NormalBufferDataPtr, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(LocalNormalBuffer.data()));
 
-				switch (Accessor.componentType)
-				{
-				case TINYGLTF_PARAMETER_TYPE_INT:
-				case TINYGLTF_PARAMETER_TYPE_UNSIGNED_INT: {
-					const std::uint32_t* buf = reinterpret_cast<const std::uint32_t*>(&Buffer.data[Accessor.byteOffset + BufferView.byteOffset]);
-					for (size_t index = 0; index < Accessor.count; index++)
-					{
-						HostIndexBuffer.push_back(buf[index] + VertexStart);
-					}
-					break;
-				}
-				case TINYGLTF_PARAMETER_TYPE_SHORT:
-				case TINYGLTF_PARAMETER_TYPE_UNSIGNED_SHORT: {
-					const std::uint16_t* buf = reinterpret_cast<const std::uint16_t*>(&Buffer.data[Accessor.byteOffset + BufferView.byteOffset]);
-					for (std::size_t index = 0; index < Accessor.count; index++)
-					{
-						HostIndexBuffer.push_back(buf[index] + VertexStart);
-					}
-					break;
-				}
-				case TINYGLTF_PARAMETER_TYPE_BYTE:
-				case TINYGLTF_PARAMETER_TYPE_UNSIGNED_BYTE: {
-					const std::uint8_t* buf = reinterpret_cast<const std::uint8_t*>(&Buffer.data[Accessor.byteOffset + BufferView.byteOffset]);
-					for (std::size_t index = 0; index < Accessor.count; index++)
-					{
-						HostIndexBuffer.push_back(buf[index] + VertexStart);
-					}
-					break;
-				}
+				const std::size_t CopyCount = std::min(VertexCount, Accessor.count);
+				for (std::size_t v = 0; v < CopyCount; v++) {
+					LocalVertexBuffer[v].Normal = LocalNormalBuffer[v];
 				}
 			}
+
+
+			if (GlTFPrimitive.attributes.find("TEXCOORD_0") != GlTFPrimitive.attributes.end())
+			{
+				const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("TEXCOORD_0")->second];
+				const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+				auto TexCoordBufferDataPtr           = reinterpret_cast<const std::uint8_t*>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+				std::vector<DirectX::XMFLOAT2> LocalTexCoordBuffer;
+				LocalTexCoordBuffer.resize(Accessor.count);
+				LoadAccessorData<float, 2>(TexCoordBufferDataPtr, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(LocalTexCoordBuffer.data()));
+
+				const std::size_t CopyCount = std::min(VertexCount, Accessor.count);
+				for (std::size_t v = 0; v < CopyCount; v++) {
+					LocalVertexBuffer[v].Uv = LocalTexCoordBuffer[v];
+				}
+
+			}
+
+			if (GlTFPrimitive.attributes.find("JOINTS_0") != GlTFPrimitive.attributes.end())
+			{
+				const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("JOINTS_0")->second];
+				const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+				auto JointIndicesBufferDataPtr0      = reinterpret_cast<const std::uint8_t*>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+				std::vector<DirectX::XMUINT4> LocalJointIndicesBuffer0;
+				LocalJointIndicesBuffer0.resize(Accessor.count);
+				LoadAccessorData<std::uint32_t, 4>(JointIndicesBufferDataPtr0, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<std::uint32_t*>(LocalJointIndicesBuffer0.data()));
+
+				const std::size_t CopyCount = std::min(VertexCount, Accessor.count);
+				for (std::size_t v = 0; v < CopyCount; v++) {
+					LocalVertexBuffer[v].JointIndices0 = LocalJointIndicesBuffer0[v];
+				}
+
+			}
+
+			if (GlTFPrimitive.attributes.find("WEIGHTS_0") != GlTFPrimitive.attributes.end())
+			{
+				const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("WEIGHTS_0")->second];
+				const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+				auto JointWeightsBufferDataPtr0      = reinterpret_cast<const std::uint8_t*>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+				std::vector<DirectX::XMFLOAT4> LocalJointWeightsBuffer0;
+				LocalJointWeightsBuffer0.resize(Accessor.count);
+				LoadAccessorData<float, 4>(JointWeightsBufferDataPtr0, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(LocalJointWeightsBuffer0.data()));
+
+				const std::size_t CopyCount = std::min(VertexCount, Accessor.count);
+				for (std::size_t v = 0; v < CopyCount; v++) {
+					LocalVertexBuffer[v].JointWeights0 = LocalJointWeightsBuffer0[v];
+				}
+			}
+
+			if (GlTFPrimitive.attributes.find("JOINTS_1") != GlTFPrimitive.attributes.end())
+			{
+				const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("JOINTS_1")->second];
+				const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+				auto JointIndicesBufferDataPtr1      = reinterpret_cast<const std::uint8_t*>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+				std::vector<DirectX::XMUINT4> LocalJointIndicesBuffer1;
+				LocalJointIndicesBuffer1.resize(Accessor.count);
+				LoadAccessorData<std::uint32_t, 4>(JointIndicesBufferDataPtr1, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<std::uint32_t*>(LocalJointIndicesBuffer1.data()));
+
+				const std::size_t CopyCount = std::min(VertexCount, Accessor.count);
+				for (std::size_t v = 0; v < CopyCount; v++) {
+					LocalVertexBuffer[v].JointIndices1 = LocalJointIndicesBuffer1[v];
+				}
+
+			}
+
+			if (GlTFPrimitive.attributes.find("WEIGHTS_1") != GlTFPrimitive.attributes.end())
+			{
+				const tinygltf::Accessor&   Accessor = M_Model.accessors[GlTFPrimitive.attributes.find("WEIGHTS_1")->second];
+				const tinygltf::BufferView& View     = M_Model.bufferViews[Accessor.bufferView];
+				auto JointWeightsBufferDataPtr1      = reinterpret_cast<const std::uint8_t*>(&(M_Model.buffers[View.buffer].data[Accessor.byteOffset + View.byteOffset]));
+
+				std::vector<DirectX::XMFLOAT4> LocalJointWeightsBuffer1;
+				LocalJointWeightsBuffer1.resize(Accessor.count);
+				LoadAccessorData<float, 4>(JointWeightsBufferDataPtr1, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(LocalJointWeightsBuffer1.data()));
+
+				const std::size_t CopyCount = std::min(VertexCount, Accessor.count);
+				for (std::size_t v = 0; v < CopyCount; v++) {
+					LocalVertexBuffer[v].JointWeights1 = LocalJointWeightsBuffer1[v];
+				}
+			}
+
+			const tinygltf::Accessor &  Accessor   = M_Model.accessors[GlTFPrimitive.indices];
+			const tinygltf::BufferView& BufferView = M_Model.bufferViews[Accessor.bufferView];
+			const tinygltf::Buffer&     Buffer     = M_Model.buffers[BufferView.buffer];
+			auto IndexBufferDataPtr                = reinterpret_cast<const std::uint8_t*>(&(Buffer.data[Accessor.byteOffset + BufferView.byteOffset]));
+
+			IndexCount += static_cast<std::uint32_t>(Accessor.count);
+
+			LocalIndexBuffer.resize(Accessor.count);
+			LoadAccessorData<std::uint32_t, 1>(IndexBufferDataPtr, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<std::uint32_t*>(LocalIndexBuffer.data()));
+
+			std::copy(LocalVertexBuffer.begin(), LocalVertexBuffer.end(), std::back_inserter(HostVertexBuffer));
+			std::copy(LocalIndexBuffer.begin(), LocalIndexBuffer.end(), std::back_inserter(HostIndexBuffer));
 
 			Primitive primitive{};
 			primitive.FirstIndex    = FirstIndex;
 			primitive.IndexCount    = IndexCount;
+			primitive.FirstVertex   = FirstVertex;
 			Node->Mesh.Primitives.push_back(primitive);
 		}
 	}
@@ -2748,8 +2136,10 @@ void VkGltfModel::LoadSkins()
 			const tinygltf::Accessor&   Accessor   = M_Model.accessors[glTFSkin.inverseBindMatrices];
 			const tinygltf::BufferView& BufferView = M_Model.bufferViews[Accessor.bufferView];
 			const tinygltf::Buffer&     Buffer     = M_Model.buffers[BufferView.buffer];
+			auto                        DataPtr    = reinterpret_cast<const std::uint8_t*>(&Buffer.data[Accessor.byteOffset + BufferView.byteOffset]);
+
 			M_Skins[i].InverseBindMatrices.resize(Accessor.count);
-			std::memcpy(M_Skins[i].InverseBindMatrices.data(), &Buffer.data[Accessor.byteOffset + BufferView.byteOffset], Accessor.count * sizeof(DirectX::XMFLOAT4X4));
+			LoadAccessorData<float, 16>(DataPtr, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(M_Skins[i].InverseBindMatrices.data()));
 
 			M_Skins[i].Ssbo = CreateBuffer(vk::BufferUsageFlagBits::eStorageBuffer, sizeof(DirectX::XMFLOAT4X4) * M_Skins[i].InverseBindMatrices.size(), M_Skins[i].InverseBindMatrices.data());
 		}
@@ -2791,12 +2181,13 @@ void VkGltfModel::LoadAnimations()
 				const tinygltf::Accessor&   Accessor   = M_Model.accessors[GlTFSampler.input];
 				const tinygltf::BufferView& BufferView = M_Model.bufferViews[Accessor.bufferView];
 				const tinygltf::Buffer &    Buffer     = M_Model.buffers[BufferView.buffer];
-				const void *                DataPtr    = &Buffer.data[Accessor.byteOffset + BufferView.byteOffset];
-				const float *               Buf        = static_cast<const float *>(DataPtr);
-				for (std::size_t Index = 0; Index < Accessor.count; Index++)
-				{
-					DstSampler.Inputs.push_back(Buf[Index]);
-				}
+				auto                        DataPtr    = reinterpret_cast<const std::uint8_t*>(&Buffer.data[Accessor.byteOffset + BufferView.byteOffset]);
+
+				std::vector<float> LocalBuffer;
+				LocalBuffer.resize(Accessor.count);
+				LoadAccessorData<float, 1>(DataPtr, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(LocalBuffer.data()));
+				std::copy(LocalBuffer.begin(), LocalBuffer.end(), std::back_inserter(DstSampler.Inputs));
+
 				for (auto input : M_Animations[i].Samplers[j].Inputs)
 				{
 					if (input < M_Animations[i].Start)
@@ -2814,46 +2205,13 @@ void VkGltfModel::LoadAnimations()
 				const tinygltf::Accessor&   Accessor   = M_Model.accessors[GlTFSampler.output];
 				const tinygltf::BufferView& BufferView = M_Model.bufferViews[Accessor.bufferView];
 				const tinygltf::Buffer &    Buffer     = M_Model.buffers[BufferView.buffer];
-				const void *                DataPtr    = &Buffer.data[Accessor.byteOffset + BufferView.byteOffset];
-				switch (Accessor.type)
-				{
-				case TINYGLTF_TYPE_SCALAR:
-				{
-					const float *Buf = static_cast<const float*>(DataPtr);
-					for (size_t Index = 0; Index < Accessor.count; Index++)
-					{
-						DstSampler.OutputsVec4.push_back(DirectX::XMFLOAT4(Buf[Index], 0.0f, 0.0f, 0.0f));
-					}
-				}
-				break;
-				case TINYGLTF_TYPE_VEC2:
-				{
-					const DirectX::XMFLOAT2 *Buf = static_cast<const DirectX::XMFLOAT2*>(DataPtr);
-					for (size_t Index = 0; Index < Accessor.count; Index++)
-					{
-						DstSampler.OutputsVec4.push_back(DirectX::XMFLOAT4(Buf[Index].x, Buf[Index].y, 0.0f, 0.0f));
-					}
-				}
-				break;
-				case TINYGLTF_TYPE_VEC3:
-				{
-					const DirectX::XMFLOAT3 *Buf = static_cast<const DirectX::XMFLOAT3*>(DataPtr);
-					for (size_t Index = 0; Index < Accessor.count; Index++)
-					{
-						DstSampler.OutputsVec4.push_back(DirectX::XMFLOAT4(Buf[Index].x, Buf[Index].y, Buf[Index].z, 0.0f));
-					}
-				}
-				break;
-				case TINYGLTF_TYPE_VEC4:
-				{
-					const DirectX::XMFLOAT4 *Buf = static_cast<const DirectX::XMFLOAT4*>(DataPtr);
-					for (size_t Index = 0; Index < Accessor.count; Index++)
-					{
-						DstSampler.OutputsVec4.push_back(Buf[Index]);
-					}
-				}
-				break;
-				}
+				auto                        DataPtr    = reinterpret_cast<const std::uint8_t*>(&Buffer.data[Accessor.byteOffset + BufferView.byteOffset]);
+
+				std::vector<DirectX::XMFLOAT4> LocalBuffer;
+				LocalBuffer.resize(Accessor.count);
+				LoadAccessorData<float, 4>(DataPtr, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(LocalBuffer.data()));
+				std::copy(LocalBuffer.begin(), LocalBuffer.end(), std::back_inserter(DstSampler.OutputsVec4));
+
 			}
 		}
 
