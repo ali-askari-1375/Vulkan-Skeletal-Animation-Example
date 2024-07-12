@@ -33,8 +33,14 @@
 
 ///////////////////////////////////////////////////////////////////////////
 
+constexpr std::uint32_t G_PreferredImageCount = 3;
+constexpr std::uint32_t G_MaxFramesInFlight = 3;
+
+///////////////////////////////////////////////////////////////////////////
+
 class VkGltfModel final
 {
+	using BufferTuple = std::tuple<vk::Buffer, vk::DeviceMemory>;
 
 public:
 	struct Primitive
@@ -87,13 +93,13 @@ public:
 
 	struct Skin
 	{
-		std::string                              Name;
-		std::shared_ptr<Node>                    SkeletonRoot{nullptr};
-		std::vector<DirectX::XMFLOAT4X4>         InverseBindMatrices;
-		std::vector<std::shared_ptr<Node>>       Joints;
-		std::tuple<vk::Buffer, vk::DeviceMemory> Ssbo;
-		void*                                    SsboMapped = nullptr;
-		vk::DescriptorSet                        DescriptorSet;
+		std::string                                        Name;
+		std::shared_ptr<Node>                              SkeletonRoot{nullptr};
+		std::vector<DirectX::XMFLOAT4X4>                   InverseBindMatrices;
+		std::vector<std::shared_ptr<Node>>                 Joints;
+		std::array<BufferTuple, G_MaxFramesInFlight>       Ssbo;
+		std::array<void*, G_MaxFramesInFlight>             SsboMapped = {};
+		std::array<vk::DescriptorSet, G_MaxFramesInFlight> DescriptorSet;
 	};
 
 
@@ -263,8 +269,6 @@ LRESULT CALLBACK WndProc(HWND Hwnd, UINT Msg, WPARAM Wparam, LPARAM Lparam);
 HINSTANCE G_Hinstance = {};
 HWND G_Hwnd = {};
 
-constexpr std::uint32_t G_PreferredImageCount = 2;
-constexpr std::uint32_t G_MaxFramesInFlight = 2;
 std::uint32_t G_CurrentFrame = 0;
 
 vk::DispatchLoaderDynamic G_DLD = {};
@@ -514,6 +518,14 @@ bool Render(bool bClearOnly)
 
 	CommandBuffer.beginRenderPass(&RenderPassBeginInfo, vk::SubpassContents::eInline, G_DLD);
 
+	static auto StartTime = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds(1);
+	static auto PrevTime = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds(1);
+	auto CurrentTime = std::chrono::high_resolution_clock::now();
+	const float DeltaTime = float(std::chrono::duration_cast<std::chrono::microseconds>(CurrentTime-PrevTime).count()) / 1000000.0f;
+	const float ElapsedTime = float(std::chrono::duration_cast<std::chrono::microseconds>(CurrentTime-StartTime).count()) / 1000000.0f;
+	PrevTime = CurrentTime;
+
+
 	if (!bClearOnly) {
 		CommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, G_Pipeline, G_DLD);
 
@@ -530,12 +542,6 @@ bool Render(bool bClearOnly)
 		DirectX::XMFLOAT4X4 MatProjViewDest;
 		DirectX::XMStoreFloat4x4(&MatProjViewDest, MatProjView);
 
-		static auto PrevTime = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds(1);
-		auto CurrentTime = std::chrono::high_resolution_clock::now();
-		const float DeltaTime = float(std::chrono::duration_cast<std::chrono::milliseconds>(CurrentTime-PrevTime).count()) / 1000.0f;
-		PrevTime = CurrentTime;
-
-
 		G_GltfModel.UpdateAnimation(DeltaTime);
 
 		for (auto &Node : G_GltfModel.M_LinearNodes) {
@@ -546,7 +552,7 @@ bool Render(bool bClearOnly)
 			DirectX::XMFLOAT4X4 MatModelDest;
 			DirectX::XMStoreFloat4x4(&MatModelDest, MatModel);
 
-			CommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, G_PipelineLayout, 0, G_GltfModel.M_Skins[Node->Skin].DescriptorSet, nullptr, G_DLD);
+			CommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, G_PipelineLayout, 0, G_GltfModel.M_Skins[Node->Skin].DescriptorSet[G_CurrentFrame], nullptr, G_DLD);
 
 			for (auto& Primitive : Node->Mesh.Primitives) {
 
@@ -904,7 +910,7 @@ void InitPhysicalDevice()
 	if (!SuitablePhysicalDevices.empty()) {
 		for (auto Item : SuitablePhysicalDevices) {
 			auto Props = Item.getProperties(G_DLD);
-			if (Props.deviceType == vk::PhysicalDeviceType::eIntegratedGpu) {
+			if (Props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
 				G_PhysicalDevice = Item;
 				break;
 			}
@@ -1108,9 +1114,9 @@ void InitSurface()
 		throw std::runtime_error("The surface doesn't support any present mode");
 
 	G_SurfacePresentMode = PresentModes[0];
-	if (G_SurfacePresentMode != vk::PresentModeKHR::eFifo) {
+	if (G_SurfacePresentMode != vk::PresentModeKHR::eMailbox) {
 		for (auto& PresentMode : PresentModes) {
-			if (PresentMode == vk::PresentModeKHR::eFifo) {
+			if (PresentMode == vk::PresentModeKHR::eMailbox) {
 				G_SurfacePresentMode = PresentMode;
 				break;
 			}
@@ -1118,7 +1124,7 @@ void InitSurface()
 	}
 	if (G_SurfacePresentMode != vk::PresentModeKHR::eMailbox && G_SurfacePresentMode != vk::PresentModeKHR::eFifo) {
 		for (auto& PresentMode : PresentModes) {
-			if (PresentMode == vk::PresentModeKHR::eMailbox) {
+			if (PresentMode == vk::PresentModeKHR::eFifo) {
 				G_SurfacePresentMode = PresentMode;
 				break;
 			}
@@ -1895,11 +1901,11 @@ bool VkGltfModel::LoadFromFile(std::string FileName)
 
 
 
-	for (auto Node : M_Nodes)
-	{
-		UpdateJoints(Node);
-	}
-	UpdateAnimation(0.1f);
+//	for (auto Node : M_Nodes)
+//	{
+//		UpdateJoints(Node);
+//	}
+//	UpdateAnimation(0.1f);
 
 
 	M_VertexBufferTuple = CreateBuffer(vk::BufferUsageFlagBits::eVertexBuffer, HostVertexBuffer.size() * sizeof(Vertex), HostVertexBuffer.data(), true);
@@ -2142,23 +2148,30 @@ void VkGltfModel::LoadSkins()
 			M_Skins[i].InverseBindMatrices.resize(Accessor.count);
 			LoadAccessorData<float, 16>(DataPtr, Accessor.count, Accessor.type, Accessor.componentType, reinterpret_cast<float*>(M_Skins[i].InverseBindMatrices.data()));
 
-			M_Skins[i].Ssbo = CreateBuffer(vk::BufferUsageFlagBits::eStorageBuffer, sizeof(DirectX::XMFLOAT4X4) * M_Skins[i].InverseBindMatrices.size(), M_Skins[i].InverseBindMatrices.data());
-			M_Skins[i].SsboMapped = G_Device.mapMemory(std::get<1>(M_Skins[i].Ssbo), 0, vk::WholeSize, {}, G_DLD);
+			for (auto& Item : M_Skins[i].Ssbo) {
+				Item = CreateBuffer(vk::BufferUsageFlagBits::eStorageBuffer, sizeof(DirectX::XMFLOAT4X4) * M_Skins[i].InverseBindMatrices.size(), M_Skins[i].InverseBindMatrices.data());
+			}
+
+			for (std::size_t m = 0; m < G_MaxFramesInFlight; m++) {
+				M_Skins[i].SsboMapped[m] = G_Device.mapMemory(std::get<1>(M_Skins[i].Ssbo[m]), 0, vk::WholeSize, {}, G_DLD);
+			}
 		}
 	}
 
-	const vk::DescriptorPoolSize PoolSize(vk::DescriptorType::eStorageBuffer, M_Skins.size());
-	const vk::DescriptorPoolCreateInfo DescriptorPoolCI = vk::DescriptorPoolCreateInfo({}, M_Skins.size(), 1, &PoolSize);
+	const vk::DescriptorPoolSize PoolSize(vk::DescriptorType::eStorageBuffer, M_Skins.size() * G_MaxFramesInFlight);
+	const vk::DescriptorPoolCreateInfo DescriptorPoolCI = vk::DescriptorPoolCreateInfo({}, M_Skins.size() * G_MaxFramesInFlight, 1, &PoolSize);
 	M_SkinsDescriptorPool = G_Device.createDescriptorPool(DescriptorPoolCI, nullptr, G_DLD);
 
 
 	for (std::size_t i = 0; i < M_Model.skins.size(); i++) {
-		const vk::DescriptorSetAllocateInfo DescriptorSetAI = vk::DescriptorSetAllocateInfo(M_SkinsDescriptorPool, 1, &G_SkinsDescriptorSetLayout);
-		M_Skins[i].DescriptorSet = G_Device.allocateDescriptorSets(DescriptorSetAI, G_DLD)[0];
+		for (std::size_t m = 0; m < G_MaxFramesInFlight; m++) {
+			const vk::DescriptorSetAllocateInfo DescriptorSetAI = vk::DescriptorSetAllocateInfo(M_SkinsDescriptorPool, 1, &G_SkinsDescriptorSetLayout);
+			M_Skins[i].DescriptorSet[m] = G_Device.allocateDescriptorSets(DescriptorSetAI, G_DLD)[0];
 
-		const vk::DescriptorBufferInfo DescriptorBI = vk::DescriptorBufferInfo(std::get<0>(M_Skins[i].Ssbo), 0, vk::WholeSize);
-		const vk::WriteDescriptorSet Write = vk::WriteDescriptorSet(M_Skins[i].DescriptorSet, 0, 0, 1,vk::DescriptorType::eStorageBuffer, nullptr, &DescriptorBI, nullptr);
-		G_Device.updateDescriptorSets(Write, nullptr, G_DLD);
+			const vk::DescriptorBufferInfo DescriptorBI = vk::DescriptorBufferInfo(std::get<0>(M_Skins[i].Ssbo[m]), 0, vk::WholeSize);
+			const vk::WriteDescriptorSet Write = vk::WriteDescriptorSet(M_Skins[i].DescriptorSet[m], 0, 0, 1,vk::DescriptorType::eStorageBuffer, nullptr, &DescriptorBI, nullptr);
+			G_Device.updateDescriptorSets(Write, nullptr, G_DLD);
+		}
 	}
 
 }
@@ -2291,7 +2304,7 @@ void VkGltfModel::UpdateJoints(std::shared_ptr<Node> Node)
 		}
 
 		const vk::DeviceSize ByteSize = JointMatrices.size() * sizeof(DirectX::XMFLOAT4X4);
-		std::memcpy(NodeSkin.SsboMapped, JointMatrices.data(), ByteSize);
+		std::memcpy(NodeSkin.SsboMapped[G_CurrentFrame], JointMatrices.data(), ByteSize);
 	}
 
 	for (auto &Child : Node->Children)
@@ -2367,18 +2380,20 @@ void VkGltfModel::Shutdown()
 
 		for (std::size_t i = 0; i < M_Skins.size(); i++) {
 
-			if (M_Skins[i].SsboMapped) {
-				G_Device.unmapMemory(std::get<1>(M_Skins[i].Ssbo), G_DLD);
-				M_Skins[i].SsboMapped = nullptr;
-			}
+			for (std::size_t m = 0; m < G_MaxFramesInFlight; m++) {
+				if (M_Skins[i].SsboMapped[m]) {
+					G_Device.unmapMemory(std::get<1>(M_Skins[i].Ssbo[m]), G_DLD);
+					M_Skins[i].SsboMapped[m] = nullptr;
+				}
 
-			if (std::get<1>(M_Skins[i].Ssbo)) {
-				G_Device.freeMemory(std::get<1>(M_Skins[i].Ssbo), nullptr, G_DLD);
-				std::get<1>(M_Skins[i].Ssbo) = nullptr;
-			}
-			if (std::get<0>(M_Skins[i].Ssbo)) {
-				G_Device.destroyBuffer(std::get<0>(M_Skins[i].Ssbo), nullptr, G_DLD);
-				std::get<0>(M_Skins[i].Ssbo) = nullptr;
+				if (std::get<1>(M_Skins[i].Ssbo[m])) {
+					G_Device.freeMemory(std::get<1>(M_Skins[i].Ssbo[m]), nullptr, G_DLD);
+					std::get<1>(M_Skins[i].Ssbo[m]) = nullptr;
+				}
+				if (std::get<0>(M_Skins[i].Ssbo[m])) {
+					G_Device.destroyBuffer(std::get<0>(M_Skins[i].Ssbo[m]), nullptr, G_DLD);
+					std::get<0>(M_Skins[i].Ssbo[m]) = nullptr;
+				}
 			}
 		}
 
