@@ -506,7 +506,6 @@ bool Render(bool bClearOnly)
 	const vk::CommandBufferBeginInfo commandBufferBeginInfo = {};
 	CommandBuffer.begin(commandBufferBeginInfo, G_DLD);
 
-
 	vk::ClearColorValue ClearColor;
 	std::memcpy(&ClearColor, DirectX::Colors::Black.f, sizeof(ClearColor));
 	static constexpr vk::ClearColorValue ClearResolve(0.0f, 0.0f, 0.0f, 1.0f);
@@ -518,13 +517,10 @@ bool Render(bool bClearOnly)
 
 	CommandBuffer.beginRenderPass(&RenderPassBeginInfo, vk::SubpassContents::eInline, G_DLD);
 
-	static auto StartTime = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds(1);
 	static auto PrevTime = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds(1);
 	auto CurrentTime = std::chrono::high_resolution_clock::now();
 	const float DeltaTime = float(std::chrono::duration_cast<std::chrono::microseconds>(CurrentTime-PrevTime).count()) / 1000000.0f;
-	const float ElapsedTime = float(std::chrono::duration_cast<std::chrono::microseconds>(CurrentTime-StartTime).count()) / 1000000.0f;
 	PrevTime = CurrentTime;
-
 
 	if (!bClearOnly) {
 		CommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, G_Pipeline, G_DLD);
@@ -1899,14 +1895,11 @@ bool VkGltfModel::LoadFromFile(std::string FileName)
 	LoadSkins();
 	LoadAnimations();
 
-
-
 //	for (auto Node : M_Nodes)
 //	{
 //		UpdateJoints(Node);
 //	}
 //	UpdateAnimation(0.1f);
-
 
 	M_VertexBufferTuple = CreateBuffer(vk::BufferUsageFlagBits::eVertexBuffer, HostVertexBuffer.size() * sizeof(Vertex), HostVertexBuffer.data(), true);
 	M_IndexBufferTuple = CreateBuffer(vk::BufferUsageFlagBits::eIndexBuffer, HostIndexBuffer.size() * sizeof(std::uint32_t), HostIndexBuffer.data(), true);
@@ -2299,7 +2292,7 @@ void VkGltfModel::UpdateJoints(std::shared_ptr<Node> Node)
 		for (std::size_t i = 0; i < NumJoints; i++)
 		{
 			DirectX::XMMATRIX JointMatrix = DirectX::XMMatrixMultiply(DirectX::XMLoadFloat4x4(&NodeSkin.InverseBindMatrices[i]), GetNodeMatrix(NodeSkin.Joints[i]));
-			JointMatrix = DirectX::XMMatrixMultiply(JointMatrix, InverseTransform);
+			//JointMatrix = DirectX::XMMatrixMultiply(JointMatrix, InverseTransform);
 			DirectX::XMStoreFloat4x4(&JointMatrices[i], JointMatrix);
 		}
 
