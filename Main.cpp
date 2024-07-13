@@ -42,6 +42,14 @@ class VkGltfModel final
 {
 	using BufferTuple = std::tuple<vk::Buffer, vk::DeviceMemory>;
 
+	enum class ChannelPath : std::uint8_t
+	{
+		eNone,
+		eTranslation,
+		eRotation,
+		eScale,
+	};
+
 public:
 	struct Primitive
 	{
@@ -112,7 +120,7 @@ public:
 
 	struct AnimationChannel
 	{
-		std::string           Path;
+		ChannelPath          Path;
 		std::shared_ptr<Node> Node;
 		std::uint32_t         SamplerIndex;
 	};
@@ -146,7 +154,7 @@ public:
 	void Shutdown();
 
 	template<typename _OutputElementType, std::size_t _OutputElementCount>
-	void LoadAccessorData(const std::uint8_t *InputDataPtr, std::size_t AccessorCount, int AccessorType, int AccessorComponentType, _OutputElementType *OutputDataPtr)
+	static constexpr void LoadAccessorData(const std::uint8_t *InputDataPtr, std::size_t AccessorCount, int AccessorType, int AccessorComponentType, _OutputElementType *OutputDataPtr)
 	{
 		const std::size_t OutputStep = _OutputElementCount;
 		std::size_t InputStep = 0;
@@ -200,6 +208,15 @@ public:
 				break;
 			}
 		}
+	}
+
+	static constexpr ChannelPath ChannelPathFromString(const std::string& PathString)
+	{
+		if (PathString == "translation") return ChannelPath::eTranslation;
+		if (PathString == "rotation") return ChannelPath::eRotation;
+		if (PathString == "scale") return ChannelPath::eScale;
+
+		return ChannelPath::eNone;
 	}
 
 public:
@@ -2228,7 +2245,7 @@ void VkGltfModel::LoadAnimations()
 		{
 			tinygltf::AnimationChannel GltfChannel = GltfAnimation.channels[j];
 			AnimationChannel&          DstChannel  = M_Animations[i].Channels[j];
-			DstChannel.Path                        = GltfChannel.target_path;
+			DstChannel.Path                        = ChannelPathFromString(GltfChannel.target_path);
 			DstChannel.SamplerIndex                = GltfChannel.sampler;
 			DstChannel.Node                        = NodeFromIndex(GltfChannel.target_node);
 		}
@@ -2269,7 +2286,6 @@ std::shared_ptr<VkGltfModel::Node> VkGltfModel::NodeFromIndex(std::uint32_t Inde
 
 DirectX::XMMATRIX VkGltfModel::GetNodeMatrix(std::shared_ptr<Node> Node)
 {
-
 	DirectX::XMMATRIX                  NodeMatrix = Node->GetLocalMatrix();
 	std::shared_ptr<VkGltfModel::Node> CurrentParent = Node->Parent;
 	while (CurrentParent)
@@ -2308,6 +2324,8 @@ void VkGltfModel::UpdateJoints(std::shared_ptr<Node> Node)
 
 void VkGltfModel::UpdateAnimation(float DeltaTime)
 {
+	if (M_Animations.empty()) return;
+
 	Animation &Anim = M_Animations[0];
 	Anim.CurrentTime += DeltaTime;
 	while (Anim.CurrentTime > Anim.End)
@@ -2319,24 +2337,21 @@ void VkGltfModel::UpdateAnimation(float DeltaTime)
 	{
 		AnimationSampler &Sampler = Anim.Samplers[Channel.SamplerIndex];
 
-//		if (Sampler.Interpolation != "LINEAR")
-//		{
-//			std::cout << "This sample only supports linear interpolations\n";
-//			continue;
-//		}
-
 		for (std::size_t i = 0; i < Sampler.Inputs.size() - 1; i++)
 		{
 			if ((Anim.CurrentTime >= Sampler.Inputs[i]) && (Anim.CurrentTime <= Sampler.Inputs[i + 1]))
 			{
 				const float a = (Anim.CurrentTime - Sampler.Inputs[i]) / (Sampler.Inputs[i + 1] - Sampler.Inputs[i]);
-				if (Channel.Path == "translation")
+				switch(Channel.Path)
+				{
+				case ChannelPath::eTranslation:
 				{
 					const DirectX::XMVECTOR TranslationVec = DirectX::XMVectorLerp(DirectX::XMLoadFloat4(&Sampler.OutputsVec4[i]), DirectX::XMLoadFloat4(&Sampler.OutputsVec4[i + 1]), a);
 					DirectX::XMStoreFloat3(&Channel.Node->Translation, TranslationVec);
 
 				}
-				if (Channel.Path == "rotation")
+				break;
+				case ChannelPath::eRotation:
 				{
 					const DirectX::XMVECTOR q1 = DirectX::XMVectorSet(Sampler.OutputsVec4[i].x, Sampler.OutputsVec4[i].y, Sampler.OutputsVec4[i].z, Sampler.OutputsVec4[i].w);
 					const DirectX::XMVECTOR q2 = DirectX::XMVectorSet(Sampler.OutputsVec4[i+1].x, Sampler.OutputsVec4[i+1].y, Sampler.OutputsVec4[i+1].z, Sampler.OutputsVec4[i+1].w);
@@ -2344,10 +2359,15 @@ void VkGltfModel::UpdateAnimation(float DeltaTime)
 					const DirectX::XMVECTOR RotationVec = DirectX::XMVector4Normalize(DirectX::XMQuaternionSlerp(q1, q2, a));
 					DirectX::XMStoreFloat4(&Channel.Node->Rotation, RotationVec);
 				}
-				if (Channel.Path == "scale")
+				break;
+				case ChannelPath::eScale:
 				{
 					const DirectX::XMVECTOR ScaleVec = DirectX::XMVectorLerp(DirectX::XMLoadFloat4(&Sampler.OutputsVec4[i]), DirectX::XMLoadFloat4(&Sampler.OutputsVec4[i + 1]), a);
 					DirectX::XMStoreFloat3(&Channel.Node->Scale, ScaleVec);
+				}
+				break;
+				default:
+					break;
 				}
 
 				break;
