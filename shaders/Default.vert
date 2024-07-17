@@ -37,7 +37,7 @@ void main()
 
 	gl_Position = PushConsts.ProjectionView * PushConsts.Model * SkinMat * vec4(Position, 1.0f);
 	OutPosition = vec3(gl_Position) * gl_Position.w;
-	OutNormal = mat3(PushConsts.Model * SkinMat) * Normal;
+	OutNormal = transpose(inverse(mat3(PushConsts.Model * SkinMat))) * Normal;
 }
 
 
