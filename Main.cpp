@@ -923,7 +923,7 @@ void InitPhysicalDevice()
 	if (!SuitablePhysicalDevices.empty()) {
 		for (auto Item : SuitablePhysicalDevices) {
 			auto Props = Item.getProperties(G_DLD);
-			if (Props.deviceType == vk::PhysicalDeviceType::eIntegratedGpu) {
+			if (Props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
 				G_PhysicalDevice = Item;
 				break;
 			}
